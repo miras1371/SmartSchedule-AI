@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartSchedule AI — Вход</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/login.css" />
+</head>
+<body>
+    <main class="login-shell">
+        <section class="login-card">
+            <div class="brand-block">
+                <div class="brand-badge">S</div>
+                <div>
+                    <div class="eyebrow">SMARTSCHEDULE AI</div>
+                    <h1>Вход в систему</h1>
+                </div>
+            </div>
+
+            <form id="login-form" class="login-form" novalidate>
+                <label>
+                    <span>Логин</span>
+                    <input id="username" name="username" type="text" autocomplete="username" placeholder="admin" required />
+                </label>
+
+                <label>
+                    <span>Пароль</span>
+                    <input id="password" name="password" type="password" autocomplete="current-password" placeholder="••••••••" required />
+                </label>
+
+                <button type="submit" class="login-button">Войти</button>
+            </form>
+
+            <div id="login-error" class="login-error" aria-live="polite"></div>
+            <div class="login-hint">
+                Администратор по умолчанию: <strong>admin</strong> / <strong>admin123</strong>
+            </div>
+        </section>
+    </main>
+
+    <script src="js/login.js"></script>
+</body>
+</html>

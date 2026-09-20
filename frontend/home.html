@@ -1,0 +1,630 @@
+<!DOCTYPE html>
+
+<html lang="ru">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+
+<title>SmartSchedule AI</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet"
+>
+
+<link rel="stylesheet" href="css/style.css">
+
+
+</head>
+
+<body>
+
+<div class="app">
+
+
+<!-- SIDEBAR -->
+<aside class="sidebar">
+
+    <div class="sidebar-top">
+
+        <div class="logo">
+            <div class="logo-icon">S</div>
+
+            <div class="logo-text">
+                <span>SmartSchedule</span>
+                <small>AI</small>
+            </div>
+        </div>
+
+        <nav class="navigation">
+
+            <div class="nav-section-title">
+                ОСНОВНОЕ
+            </div>
+
+            <a href="dashboard.html" class="nav-item" data-screen="dashboard">
+                <span class="nav-icon">⌂</span>
+                <span>Dashboard</span>
+            </a>
+
+            <div class="nav-item" data-nav-group="schedule">
+                <span class="nav-icon">▦</span>
+                <span>Расписание</span>
+            </div>
+
+            <div class="nav-submenu">
+                <a href="home.html" class="nav-subitem active-subitem" data-screen="schedule">
+                    Просмотр расписания
+                </a>
+
+                <a href="generation.html" class="nav-subitem" data-screen="generation">
+                    Генерация
+                </a>
+
+                <a href="versions.html" class="nav-subitem" data-screen="versions">
+                    Версии
+                </a>
+            </div>
+
+            <div class="nav-section-title">
+                УЧЕБНЫЕ ДАННЫЕ
+            </div>
+
+            <a href="periods.html" class="nav-item" data-screen="periods">
+                <span class="nav-icon">◫</span>
+                <span>Семестры</span>
+            </a>
+
+            <a href="curricula.html" class="nav-item" data-screen="curricula">
+                <span class="nav-icon">▤</span>
+                <span>Учебные планы</span>
+            </a>
+
+            <a href="subjects.html" class="nav-item" data-screen="subjects">
+                <span class="nav-icon">◈</span>
+                <span>Предметы</span>
+            </a>
+
+            <a href="groups.html" class="nav-item" data-screen="groups">
+                <span class="nav-icon">♙</span>
+                <span>Группы</span>
+            </a>
+
+            <div class="nav-section-title">
+                ЛЮДИ
+            </div>
+
+            <a href="teachers.html" class="nav-item" data-screen="teachers">
+                <span class="nav-icon">♙</span>
+                <span>Преподаватели</span>
+            </a>
+
+            <a href="qualifications.html" class="nav-item" data-screen="qualifications">
+                <span class="nav-icon">✓</span>
+                <span>Квалификации</span>
+            </a>
+
+            <div class="nav-section-title">
+                РЕСУРСЫ
+            </div>
+
+            <a href="classrooms.html" class="nav-item" data-screen="classrooms">
+                <span class="nav-icon">▣</span>
+                <span>Аудитории</span>
+            </a>
+
+            <a href="availability.html" class="nav-item" data-screen="availability">
+                <span class="nav-icon">◷</span>
+                <span>Доступность</span>
+            </a>
+
+            <div class="nav-section-title">
+                СИСТЕМА
+            </div>
+
+            <a href="constraints.html" class="nav-item" data-screen="constraints">
+                <span class="nav-icon">◌</span>
+                <span>Ограничения</span>
+            </a>
+
+            <a href="analytics.html" class="nav-item" data-screen="analytics">
+                <span class="nav-icon">▥</span>
+                <span>Аналитика</span>
+            </a>
+
+        </nav>
+
+    </div>
+
+    <div class="sidebar-bottom">
+
+        <a href="profile.html" class="nav-item" id="settings-nav-item" data-screen="profile">
+            <span class="nav-icon">⚙</span>
+            <span>Настройки</span>
+        </a>
+
+        <button class="profile-mini" id="profile-menu-button" type="button">
+
+            <div class="avatar">
+                М
+            </div>
+
+            <div class="profile-info">
+                <strong id="sidebar-profile-name">Администратор</strong>
+                    <span id="sidebar-profile-role">Администратор</span>
+            </div>
+
+            <span class="profile-arrow">⋯</span>
+
+        </button>
+
+    </div>
+
+</aside>
+
+
+<!-- MAIN -->
+<main class="main">
+
+    <!-- HEADER -->
+    <header class="topbar">
+
+        <div class="breadcrumbs">
+            <span id="breadcrumb-section">Расписание</span>
+            <span>/</span>
+            <span id="breadcrumb-page">Просмотр расписания</span>
+        </div>
+
+        <div class="topbar-actions">
+
+            <button class="icon-button" type="button">
+                ?
+            </button>
+
+            <button class="icon-button" type="button">
+                🔔
+            </button>
+
+            <button id="logout-button" class="icon-button logout-button" type="button" title="Выйти">
+                ⎋
+            </button>
+
+            <button class="topbar-avatar" id="topbar-profile-button" type="button">
+                М
+            </button>
+
+        </div>
+
+    </header>
+
+
+    <!-- CONTENT -->
+    <div class="content">
+
+        <section class="page-header">
+
+            <div>
+                <div class="eyebrow">
+                    УЧЕБНОЕ РАСПИСАНИЕ
+                </div>
+
+                <h1 id="page-title">
+                    Расписание
+                </h1>
+
+                <p id="page-description">
+                    Просмотр и управление расписанием учебных групп
+                </p>
+            </div>
+
+            <button
+                id="generate-button"
+                class="primary-button"
+            >
+                <span>✦</span>
+                Сгенерировать расписание
+            </button>
+
+        </section>
+
+
+        <!-- STAT CARDS -->
+        <section class="stats-grid">
+
+            <div class="stat-card">
+
+                <div class="stat-icon blue">
+                    ▦
+                </div>
+
+                <div>
+                    <span class="stat-label">
+                        Занятий
+                    </span>
+
+                    <strong id="stat-lessons">
+                        —
+                    </strong>
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="stat-icon purple">
+                    ♙
+                </div>
+
+                <div>
+                    <span class="stat-label">
+                        Группы
+                    </span>
+
+                <strong id="stat-groups">—</strong>
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="stat-icon green">
+                    ✓
+                </div>
+
+                <div>
+                    <span class="stat-label">
+                        Статус
+                    </span>
+
+                    <strong class="status-online">
+                        Готово
+                    </strong>
+                </div>
+
+            </div>
+
+
+            <div class="stat-card">
+
+                <div class="stat-icon orange">
+                    AI
+                </div>
+
+                <div>
+                    <span class="stat-label">
+                        Оптимизация
+                    </span>
+
+                    <strong>
+                        AI Planner
+                    </strong>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- TOOLBAR -->
+        <section class="schedule-toolbar">
+
+            <div class="toolbar-left">
+
+                <div class="select-wrapper">
+
+                    <label>
+                        Семестр
+                    </label>
+
+                    <select id="semester-select">
+                        <option value="">Загрузка...</option>
+                    </select>
+
+                </div>
+
+                <div class="select-wrapper">
+                    <label>Версия</label>
+                    <select id="version-select" disabled>
+                        <option value="">Выберите семестр</option>
+                    </select>
+                </div>
+
+
+                <div class="select-wrapper">
+
+                    <label>
+                        Группа
+                    </label>
+
+                <select id="group-select">
+                    <option value="">Все группы</option>
+                </select>
+
+                </div>
+
+
+                <div class="view-switcher">
+
+                    <button class="view-button active" type="button" data-view="week">
+                        Неделя
+                    </button>
+
+                    <button class="view-button" type="button" data-view="day">
+                        День
+                    </button>
+
+                    <button class="view-button" type="button" data-view="group">
+                        Группа
+                    </button>
+
+                </div>
+
+                <div class="select-wrapper day-filter" hidden>
+                    <label for="day-select">День</label>
+                    <select id="day-select">
+                        <option value="1">Понедельник</option>
+                        <option value="2">Вторник</option>
+                        <option value="3">Среда</option>
+                        <option value="4">Четверг</option>
+                        <option value="5">Пятница</option>
+                        <option value="6">Суббота</option>
+                    </select>
+                </div>
+
+            </div>
+
+
+            <div class="toolbar-right">
+
+                <button id="refresh-button" class="secondary-button" type="button">
+                    ⟳ Обновить
+                </button>
+
+                <button id="filters-button" class="secondary-button" type="button">
+                    Фильтры
+                </button>
+                <input id="schedule-search" class="schedule-search" type="search" placeholder="Поиск предмета или преподавателя">
+                <button id="export-excel-button" class="secondary-button" type="button">Excel</button>
+                <button id="export-pdf-button" class="secondary-button" type="button">PDF</button>
+
+            </div>
+
+        </section>
+
+
+        <!-- STATUS -->
+        <div
+            id="status"
+            class="status"
+        >
+            Подключение к API...
+        </div>
+
+        <div class="schedule-legend" aria-label="Типы занятий">
+            <span><i class="legend-dot lecture"></i>Лекция</span>
+            <span><i class="legend-dot practice"></i>Практика</span>
+            <span><i class="legend-dot lab"></i>Лабораторная</span>
+        </div>
+
+        <section id="generation-panel" class="workspace-panel">
+            <div class="panel-heading">
+                <div>
+                    <div class="eyebrow">АВТОМАТИЧЕСКОЕ ПЛАНИРОВАНИЕ</div>
+                    <h2>Генерация расписания</h2>
+                    <p>Проверьте учебный период и запустите построение расписания.</p>
+                </div>
+                <button id="diagnostics-button" class="secondary-button" type="button">
+                    Проверить данные
+                </button>
+            </div>
+            <div id="diagnostics-result" class="diagnostics-grid">
+                <div class="empty-panel">Выберите период и запустите проверку.</div>
+            </div>
+        </section>
+
+        <section id="versions-panel" class="workspace-panel">
+            <div class="panel-heading">
+                <div>
+                    <div class="eyebrow">УПРАВЛЕНИЕ РЕЗУЛЬТАТАМИ</div>
+                    <h2>Версии расписания</h2>
+                    <p>Публикуйте проверенную версию или архивируйте устаревшую.</p>
+                </div>
+                <button id="versions-refresh-button" class="secondary-button" type="button">
+                    Обновить список
+                </button>
+            </div>
+            <div id="versions-list" class="versions-list">
+                <div class="empty-panel">Загрузка версий...</div>
+            </div>
+        </section>
+
+        <section id="management-panel" class="workspace-panel">
+            <div class="panel-heading">
+                <div>
+                    <div class="eyebrow" id="management-eyebrow">СПРАВОЧНИКИ</div>
+                    <h2 id="management-title">Данные системы</h2>
+                    <p id="management-description">Просмотр данных, используемых генератором расписания.</p>
+                </div>
+                <div class="panel-actions">
+                    <button id="management-add-button" class="primary-button" type="button" hidden>Добавить</button>
+                    <button id="management-refresh-button" class="secondary-button" type="button">Обновить</button>
+                </div>
+            </div>
+            <div id="management-filters" class="management-filters" hidden></div>
+            <div id="management-summary" class="diagnostics-grid"></div>
+            <div class="management-table-wrap">
+                <table class="management-table">
+                    <thead id="management-table-head"></thead>
+                    <tbody id="management-table-body"></tbody>
+                </table>
+            </div>
+        </section>
+
+        <section id="profile-panel" class="workspace-panel">
+            <div class="panel-heading">
+                <div>
+                    <div class="eyebrow">ЛИЧНЫЙ ПРОФИЛЬ</div>
+                    <h2>Настройки администратора</h2>
+                    <p>Управляйте личными данными, безопасностью и оформлением интерфейса.</p>
+                </div>
+                <button id="profile-logout-button" class="secondary-button" type="button">Выйти из аккаунта</button>
+            </div>
+            <div class="profile-settings-grid">
+                <form id="profile-form" class="settings-card">
+                    <div class="settings-card-heading"><span class="settings-icon">◉</span><div><h3>Личные данные</h3><p>Логин и имя отображаются в интерфейсе.</p></div></div>
+                    <label><span>Логин</span><input id="profile-username" name="username" required></label>
+                    <label><span>Имя</span><input id="profile-full-name" name="full_name" required></label>
+                    <label><span>Текущий пароль</span><input name="current_password" type="password" required></label>
+                    <button class="primary-button" type="submit">Сохранить данные</button>
+                </form>
+                <form id="password-form" class="settings-card">
+                    <div class="settings-card-heading"><span class="settings-icon purple-icon">◆</span><div><h3>Безопасность</h3><p>Измените пароль администратора.</p></div></div>
+                    <label><span>Текущий пароль</span><input name="current_password" type="password" required></label>
+                    <label><span>Новый пароль</span><input name="new_password" type="password" minlength="4" required></label>
+                    <label><span>Повторите новый пароль</span><input name="repeat_password" type="password" minlength="4" required></label>
+                    <button class="primary-button" type="submit">Изменить пароль</button>
+                </form>
+                <div class="settings-card">
+                    <div class="settings-card-heading"><span class="settings-icon green-icon">☼</span><div><h3>Внешний вид</h3><p>Настройте оформление рабочего пространства.</p></div></div>
+                    <div class="theme-options" role="group" aria-label="Тема сайта">
+                        <button type="button" class="theme-option" data-theme-choice="light"><span class="theme-preview light-preview"></span><strong>Светлая</strong><small>Классический интерфейс</small></button>
+                        <button type="button" class="theme-option" data-theme-choice="dark"><span class="theme-preview dark-preview"></span><strong>Тёмная</strong><small>Для работы вечером</small></button>
+                        <button type="button" class="theme-option" data-theme-choice="system"><span class="theme-preview system-preview"></span><strong>Системная</strong><small>По настройкам устройства</small></button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <div id="entity-modal" class="lesson-modal" hidden>
+            <div class="lesson-modal-backdrop" data-close-entity-modal></div>
+            <section class="lesson-modal-content entity-modal-content" role="dialog" aria-modal="true">
+                <button class="lesson-modal-close" type="button" data-close-entity-modal aria-label="Закрыть">×</button>
+                <div class="eyebrow">УПРАВЛЕНИЕ ДАННЫМИ</div>
+                <h2 id="entity-modal-title">Добавить запись</h2>
+                <form id="entity-form" class="entity-form"></form>
+            </section>
+        </div>
+
+        <div id="lesson-modal" class="lesson-modal" hidden>
+            <div class="lesson-modal-backdrop" data-close-modal></div>
+            <section class="lesson-modal-content" role="dialog" aria-modal="true" aria-labelledby="lesson-modal-title">
+                <button class="lesson-modal-close" type="button" data-close-modal aria-label="Закрыть">×</button>
+                <div id="lesson-modal-body"></div>
+            </section>
+        </div>
+
+        <!-- SCHEDULE -->
+        <section class="schedule-card">
+
+            <div class="schedule-card-header">
+
+                <div>
+
+                    <h2>
+                        Учебная неделя
+                    </h2>
+
+                    <span>
+                        Понедельник — Суббота
+                    </span>
+
+                </div>
+
+                <div class="week-navigation">
+
+                    <button>
+                        ‹
+                    </button>
+
+                    <span>
+                        Текущая неделя
+                    </span>
+
+                    <button>
+                        ›
+                    </button>
+
+                </div>
+
+                <div class="schedule-zoom" aria-label="Масштаб сетки">
+                    <button id="zoom-out-button" class="zoom-button" type="button" aria-label="Уменьшить масштаб">−</button>
+                    <button id="zoom-reset-button" class="zoom-value" type="button" aria-label="Сбросить масштаб">100%</button>
+                    <button id="zoom-in-button" class="zoom-button" type="button" aria-label="Увеличить масштаб">+</button>
+                </div>
+
+            </div>
+
+
+            <div class="schedule-wrapper">
+
+                <table class="schedule-table">
+
+                    <thead>
+
+                    <tr>
+
+                        <th class="time-column">
+                            Время
+                        </th>
+
+                        <th>
+                            <span>ПН</span>
+                            Понедельник
+                        </th>
+
+                        <th>
+                            <span>ВТ</span>
+                            Вторник
+                        </th>
+
+                        <th>
+                            <span>СР</span>
+                            Среда
+                        </th>
+
+                        <th>
+                            <span>ЧТ</span>
+                            Четверг
+                        </th>
+
+                        <th>
+                            <span>ПТ</span>
+                            Пятница
+                        </th>
+
+                        <th>
+                            <span>СБ</span>
+                            Суббота
+                        </th>
+
+                    </tr>
+
+                    </thead>
+
+                    <tbody id="schedule-body">
+                        <tr><td colspan="7">Выберите семестр и версию расписания.</td></tr>
+                    </tbody>
+
+                </table>
+
+            </div>
+
+        </section>
+
+    </div>
+
+</main>
+
+    
+</div>
+
+<script src="js/script.js"></script>
+
+</body>
+</html>
