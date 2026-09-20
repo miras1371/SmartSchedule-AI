@@ -1,5 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
 
 from backend.app.core.auth import ensure_default_admin_user, require_admin_access
 from backend.app.core.database import (
@@ -120,10 +122,13 @@ app.include_router(catalog_router)
 app.include_router(constraints_router)
 app.include_router(teachers_router)
 
-
 @app.get("/health")
 def health_check():
     return {
         "status": "ok",
         "message": "SmartSchedule AI работает",
     }
+
+
+frontend_directory = Path(__file__).resolve().parents[3] / "frontend"
+app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")

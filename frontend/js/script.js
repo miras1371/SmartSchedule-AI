@@ -1,4 +1,6 @@
-const apiBase = "http://localhost:8000";
+const apiBase = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:8000"
+  : window.location.origin;
 const tokenKey = "smart_schedule_token";
 const $ = (selector) => document.querySelector(selector);
 const semesterSelect = $("#semester-select");

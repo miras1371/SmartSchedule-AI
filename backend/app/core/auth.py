@@ -152,7 +152,13 @@ async def require_admin_access(request: Request, call_next):
         "/auth/login",
     }
 
-    if request.method == "OPTIONS" or request.url.path in open_paths:
+    static_extensions = (".html", ".js", ".css", ".ico", ".png", ".jpg", ".svg")
+    if (
+        request.method == "OPTIONS"
+        or request.url.path in open_paths
+        or request.url.path == "/"
+        or request.url.path.endswith(static_extensions)
+    ):
         return await call_next(request)
 
     auth_header = request.headers.get("authorization", "")

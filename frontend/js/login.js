@@ -1,4 +1,6 @@
-const apiBase = "http://localhost:8000";
+const apiBase = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+  ? "http://localhost:8000"
+  : window.location.origin;
 const form = document.querySelector("#login-form");
 const usernameInput = document.querySelector("#username");
 const passwordInput = document.querySelector("#password");
