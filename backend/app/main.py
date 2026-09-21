@@ -130,5 +130,5 @@ def health_check():
     }
 
 
-frontend_directory = Path(__file__).resolve().parents[3] / "frontend"
+frontend_directory = Path(__file__).resolve().parents[2] / "frontend"
 app.mount("/", StaticFiles(directory=frontend_directory, html=True), name="frontend")
