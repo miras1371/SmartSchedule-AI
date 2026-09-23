@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from sqlalchemy import text
 
 from backend.app.core.auth import ensure_default_admin_user, require_admin_access
 from backend.app.core.database import (
@@ -40,6 +41,7 @@ from backend.app.models import (
     TimeSlot,
     ScheduleVersion,
     ScheduleItem,
+    ScheduleItemClassroom,
     GenerationJob,
 )
 
@@ -63,6 +65,7 @@ from backend.app.api.schedules import router as schedules_router
 from backend.app.api.catalog import router as catalog_router
 from backend.app.api.constraints import router as constraints_router
 from backend.app.api.teachers import router as teachers_router
+from backend.app.api.management import router as management_router
 
 from backend.app.services.time_slot_service import (
     create_default_time_slots,
@@ -71,6 +74,8 @@ from backend.app.services.time_slot_service import (
 
 if settings.APP_ENV.lower() != "production":
     Base.metadata.create_all(bind=engine)
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE teacher_loads ADD COLUMN IF NOT EXISTS language VARCHAR(50) NOT NULL DEFAULT 'Русский'"))
 
 
 def initialize_time_slots() -> None:
@@ -121,6 +126,7 @@ app.include_router(schedules_router)
 app.include_router(catalog_router)
 app.include_router(constraints_router)
 app.include_router(teachers_router)
+app.include_router(management_router)
 
 @app.get("/health")
 def health_check():

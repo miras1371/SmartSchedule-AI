@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -30,6 +30,7 @@ class TeacherLoadRequest(BaseModel):
     lecture_max_students: int = Field(default=70, gt=0)
     practice_max_students: int | None = Field(default=None, gt=0)
     lab_max_students: int | None = Field(default=None, gt=0)
+    language: str = Field(default="Русский", min_length=1, max_length=50)
 
 
 def _load_response(load: TeacherLoad) -> dict:
@@ -47,6 +48,7 @@ def _load_response(load: TeacherLoad) -> dict:
             "lecture_max_students": load.lecture_max_students,
             "practice_max_students": load.practice_max_students,
             "lab_max_students": load.lab_max_students,
+            "language": load.language,
         },
     }
 
@@ -233,6 +235,7 @@ def get_teacher_loads(
                         load.practice_max_students
                     ),
                     "lab_max_students": load.lab_max_students,
+                    "language": load.language,
                 },
                 "allocated": assigned,
                 "remaining": {
@@ -256,3 +259,55 @@ def get_teacher_loads(
         "count": len(result),
         "teacher_loads": result,
     }
+
+
+@router.delete("/{load_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_teacher_load(load_id: int, db: Session = Depends(get_db)):
+    load = db.query(TeacherLoad).filter(TeacherLoad.id == load_id).first()
+    if load is None:
+        raise HTTPException(status_code=404, detail="Нагрузка преподавателя не найдена.")
+    if load.assignments:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "У нагрузки есть назначенные занятия. Повторите удаление "
+                "с параметром remove_assignments=true, чтобы удалить назначения "
+                "и связанные занятия из расписаний."
+            ),
+        )
+    db.delete(load)
+    db.commit()
+
+
+@router.delete(
+    "/{load_id}/with-assignments",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def delete_teacher_load_with_assignments(
+    load_id: int,
+    db: Session = Depends(get_db),
+):
+    load = db.query(TeacherLoad).filter(TeacherLoad.id == load_id).first()
+    if load is None:
+        raise HTTPException(status_code=404, detail="Нагрузка преподавателя не найдена.")
+
+    assignment_ids = {assignment.id for assignment in load.assignments}
+    affected_lessons = {
+        target.lesson
+        for assignment in load.assignments
+        for target in assignment.lesson_targets
+        if target.lesson is not None
+    }
+
+    # A common lesson may contain targets from several teacher assignments.
+    # Delete the whole lesson only when every target belongs to this load;
+    # otherwise the assignment cascade removes only this load's targets.
+    for lesson in affected_lessons:
+        if all(
+            target.teacher_assignment_id in assignment_ids
+            for target in lesson.targets
+        ):
+            db.delete(lesson)
+
+    db.delete(load)
+    db.commit()

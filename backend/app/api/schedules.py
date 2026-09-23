@@ -3,7 +3,7 @@ from uuid import uuid4
 import logging
 from multiprocessing import Process
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,6 +14,8 @@ from backend.app.models.academic_period import AcademicPeriod
 from backend.app.models.generation_job import GenerationJob
 from backend.app.models.schedule_item import ScheduleItem
 from backend.app.models.schedule_version import ScheduleVersion
+from backend.app.models.classroom import Classroom
+from backend.app.models.time_slot import TimeSlot
 from backend.app.scheduler.data_loader import load_scheduling_data
 from backend.app.scheduler.scheduler import ScheduleGenerator, generate_schedule
 from backend.app.services.schedule_validation_service import (
@@ -108,7 +110,7 @@ def _version_response(version: ScheduleVersion) -> dict:
     }
 
 
-def _target_response(target) -> dict:
+def _target_response(target, classroom) -> dict:
     group_pairs = {
         (student.student.group_id, student.student.group.name)
         for student in (
@@ -142,12 +144,12 @@ def _target_response(target) -> dict:
         "group_names": [group_name for _, group_name in sorted(group_pairs)],
         "classroom": (
             {
-                "id": target.classroom.id,
-                "name": target.classroom.name,
-                "capacity": target.classroom.capacity,
-                "room_type": target.classroom.room_type,
+                "id": classroom.id,
+                "name": classroom.name,
+                "capacity": classroom.capacity,
+                "room_type": classroom.room_type,
             }
-            if target.classroom
+            if classroom
             else None
         ),
     }
@@ -164,6 +166,10 @@ def _target_response(target) -> dict:
 
 def _item_response(item: ScheduleItem) -> dict:
     lesson = item.lesson
+    classrooms_by_target = {
+        assignment.lesson_target_id: assignment.classroom
+        for assignment in item.classroom_assignments
+    }
     first_target = lesson.targets[0] if lesson.targets else None
     assignment = first_target.teacher_assignment if first_target else None
     teacher = (
@@ -201,7 +207,13 @@ def _item_response(item: ScheduleItem) -> dict:
             if subject
             else None
         ),
-        "targets": [_target_response(target) for target in lesson.targets],
+        "targets": [
+            _target_response(
+                target,
+                classrooms_by_target.get(target.id),
+            )
+            for target in lesson.targets
+        ],
     }
 
 
@@ -314,7 +326,7 @@ def get_generation_status(job_id: str, db: Session = Depends(get_db)):
 
 @router.get("/diagnostics/{academic_period_id}")
 def diagnose_schedule_period(
-    academic_period_id: int,
+    academic_period_id: int = Path(gt=0),
     db: Session = Depends(get_db),
 ):
     try:
@@ -329,13 +341,106 @@ def diagnose_schedule_period(
             "error": str(error),
             "issues": [str(error)],
         }
-
     return {
         "academic_period_id": academic_period_id,
         "valid": True,
         "lessons_count": len(generator.data.lessons),
         "time_slots_count": len(generator.data.time_slots),
         "classrooms_count": len(generator.data.classrooms),
+    }
+
+
+@router.get("/classroom-map")
+def get_classroom_map(
+    version_id: int | None = Query(default=None, gt=0),
+    db: Session = Depends(get_db),
+):
+    """Return the selected schedule version in a classroom-oriented shape."""
+    version_query = db.query(ScheduleVersion)
+    if version_id is not None:
+        version = version_query.filter(ScheduleVersion.id == version_id).first()
+    else:
+        version = (
+            version_query.filter(ScheduleVersion.status == "published")
+            .order_by(ScheduleVersion.created_at.desc())
+            .first()
+            or version_query.order_by(ScheduleVersion.created_at.desc()).first()
+        )
+    if version is None:
+        raise HTTPException(status_code=404, detail="Нет доступной версии расписания.")
+
+    schedule = get_schedule(version.id, None, None, None, db)
+    classrooms = db.query(Classroom).order_by(Classroom.name).all()
+    slots = (
+        db.query(TimeSlot)
+        .filter(TimeSlot.is_active.is_(True))
+        .order_by(TimeSlot.day_of_week, TimeSlot.lesson_number)
+        .all()
+    )
+    classroom_items: dict[int, dict[tuple[int, int], dict]] = {
+        classroom.id: {} for classroom in classrooms
+    }
+    for item in schedule["items"]:
+        for target in item["targets"]:
+            classroom = target.get("classroom")
+            if classroom is None or classroom["id"] not in classroom_items:
+                continue
+            key = (item["time_slot"]["day_of_week"], item["time_slot"]["lesson_number"])
+            entry = classroom_items[classroom["id"]].setdefault(
+                key,
+                {
+                    "lesson_id": item["lesson_id"],
+                    "subject": item["subject"],
+                    "lesson_type": item["lesson_type"],
+                    "teacher": item["teacher"],
+                    "time_slot": item["time_slot"],
+                    "group_names": set(),
+                    "subgroup_names": set(),
+                },
+            )
+            entry["group_names"].update(target.get("group_names") or [])
+            if target.get("subgroup_name"):
+                entry["subgroup_names"].add(target["subgroup_name"])
+
+    result_classrooms = []
+    for classroom in classrooms:
+        activities = [
+            {
+                **entry,
+                "group_names": sorted(entry["group_names"]),
+                "subgroup_names": sorted(entry["subgroup_names"]),
+            }
+            for entry in classroom_items[classroom.id].values()
+        ]
+        activities.sort(
+            key=lambda item: (
+                item["time_slot"]["day_of_week"],
+                item["time_slot"]["lesson_number"],
+            )
+        )
+        result_classrooms.append(
+            {
+                "id": classroom.id,
+                "name": classroom.name,
+                "capacity": classroom.capacity,
+                "room_type": classroom.room_type,
+                "equipment": classroom.equipment,
+                "activities": activities,
+            }
+        )
+    return {
+        "version": schedule["version"],
+        "time_slots": [
+            {
+                "id": slot.id,
+                "day_of_week": slot.day_of_week,
+                "lesson_number": slot.lesson_number,
+                "start_time": slot.start_time,
+                "end_time": slot.end_time,
+            }
+            for slot in slots
+        ],
+        "classrooms": result_classrooms,
     }
 
 
@@ -471,7 +576,8 @@ def get_schedule(
         ):
             continue
         if classroom_id is not None and not any(
-            target.classroom_id == classroom_id for target in targets
+            assignment.classroom_id == classroom_id
+            for assignment in item.classroom_assignments
         ):
             continue
         items.append(_item_response(item))

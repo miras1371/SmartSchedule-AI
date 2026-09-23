@@ -37,7 +37,7 @@ def create_classroom(
 
     if existing_classroom is not None:
         raise HTTPException(
-            status_code=400,
+            status_code=409,
             detail="Аудитория с таким названием уже существует.",
         )
 
@@ -138,7 +138,7 @@ def delete_classroom(classroom_id: int, db: Session = Depends(get_db)):
     classroom = db.query(Classroom).filter(Classroom.id == classroom_id).first()
     if classroom is None:
         raise HTTPException(status_code=404, detail="Аудитория не найдена.")
-    if classroom.lesson_targets:
+    if classroom.lesson_targets or classroom.schedule_assignments:
         raise HTTPException(
             status_code=400,
             detail="Нельзя удалить аудиторию, используемую в расписании.",

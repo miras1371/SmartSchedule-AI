@@ -14,24 +14,35 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        "scheduling_constraints",
-        sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
-        sa.Column("constraint_type", sa.String(length=30), nullable=False),
-        sa.Column("title", sa.String(length=150), nullable=False),
-        sa.Column("description", sa.Text(), nullable=False),
-        sa.Column("teacher_id", sa.Integer(), nullable=True),
-        sa.Column("classroom_id", sa.Integer(), nullable=True),
-        sa.Column("day_of_week", sa.Integer(), nullable=True),
-        sa.Column("start_time", sa.String(length=5), nullable=True),
-        sa.Column("end_time", sa.String(length=5), nullable=True),
-        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index("ix_scheduling_constraints_constraint_type", "scheduling_constraints", ["constraint_type"])
-    op.create_index("ix_scheduling_constraints_teacher_id", "scheduling_constraints", ["teacher_id"])
-    op.create_index("ix_scheduling_constraints_classroom_id", "scheduling_constraints", ["classroom_id"])
+    inspector = sa.inspect(op.get_bind())
+    if not inspector.has_table("scheduling_constraints"):
+        op.create_table(
+            "scheduling_constraints",
+            sa.Column("id", sa.Integer(), autoincrement=True, nullable=False),
+            sa.Column("constraint_type", sa.String(length=30), nullable=False),
+            sa.Column("title", sa.String(length=150), nullable=False),
+            sa.Column("description", sa.Text(), nullable=False),
+            sa.Column("teacher_id", sa.Integer(), nullable=True),
+            sa.Column("classroom_id", sa.Integer(), nullable=True),
+            sa.Column("day_of_week", sa.Integer(), nullable=True),
+            sa.Column("start_time", sa.String(length=5), nullable=True),
+            sa.Column("end_time", sa.String(length=5), nullable=True),
+            sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.PrimaryKeyConstraint("id"),
+        )
+        existing_indexes = set()
+    else:
+        existing_indexes = {
+            index["name"] for index in inspector.get_indexes("scheduling_constraints")
+        }
+    for name, columns in (
+        ("ix_scheduling_constraints_constraint_type", ["constraint_type"]),
+        ("ix_scheduling_constraints_teacher_id", ["teacher_id"]),
+        ("ix_scheduling_constraints_classroom_id", ["classroom_id"]),
+    ):
+        if name not in existing_indexes:
+            op.create_index(name, "scheduling_constraints", columns)
 
 
 def downgrade() -> None:

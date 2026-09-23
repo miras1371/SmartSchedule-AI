@@ -18,9 +18,16 @@ from backend.app.models.user import User
 DEFAULT_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
 DEFAULT_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 JWT_SECRET_KEY = os.getenv("APP_SECRET_KEY", "smart-schedule-admin-secret-key")
+APP_ENV = os.getenv("APP_ENV", "development").lower()
 JWT_ALGORITHM = "HS256"
 JWT_TTL_HOURS = 8
 security = HTTPBearer(auto_error=False)
+
+if APP_ENV == "production":
+    if JWT_SECRET_KEY == "smart-schedule-admin-secret-key":
+        raise RuntimeError("APP_SECRET_KEY must be configured in production.")
+    if DEFAULT_ADMIN_PASSWORD == "admin123":
+        raise RuntimeError("ADMIN_PASSWORD must be configured in production.")
 
 
 def hash_password(password: str) -> str:
@@ -38,7 +45,10 @@ def verify_password(password: str, password_hash: str | None) -> bool:
     if not password_hash or not password_hash.startswith("pbkdf2_sha256$"):
         return False
 
-    _, salt, expected_hash = password_hash.split("$", 2)
+    try:
+        _, salt, expected_hash = password_hash.split("$", 2)
+    except ValueError:
+        return False
     digest = hashlib.pbkdf2_hmac(
         "sha256",
         password.encode("utf-8"),
@@ -87,7 +97,15 @@ def get_current_admin_user(
             detail="Токен не содержит пользователя",
         )
 
-    user = db.query(User).filter(User.id == int(user_id)).first()
+    try:
+        parsed_user_id = int(user_id)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Токен содержит некорректного пользователя",
+        ) from exc
+
+    user = db.query(User).filter(User.id == parsed_user_id).first()
     if user is None or not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

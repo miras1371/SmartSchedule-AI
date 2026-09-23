@@ -61,3 +61,9 @@ class ScheduleItem(Base):
         "TimeSlot",
         back_populates="schedule_items",
     )
+
+    classroom_assignments = relationship(
+        "ScheduleItemClassroom",
+        back_populates="schedule_item",
+        cascade="all, delete-orphan",
+    )

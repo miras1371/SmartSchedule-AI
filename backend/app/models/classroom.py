@@ -44,3 +44,8 @@ class Classroom(Base):
         "LessonTarget",
         back_populates="classroom",
     )
+
+    schedule_assignments = relationship(
+        "ScheduleItemClassroom",
+        back_populates="classroom",
+    )

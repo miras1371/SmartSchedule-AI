@@ -1,13 +1,20 @@
 from dataclasses import dataclass
 from datetime import time
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from backend.app.models.classroom import Classroom
 from backend.app.models.curriculum import Curriculum
 from backend.app.models.curriculum_subject import CurriculumSubject
+from backend.app.models.group import Group
 from backend.app.models.lesson import Lesson
 from backend.app.models.lesson_target import LessonTarget
+from backend.app.models.lecture_part import LecturePart
+from backend.app.models.lecture_part_student import LecturePartStudent
+from backend.app.models.student import Student
+from backend.app.models.subgroup import Subgroup
+from backend.app.models.subgroup_bundle import SubgroupBundle
+from backend.app.models.subgroup_bundle_member import SubgroupBundleMember
 from backend.app.models.teacher_assignment import TeacherAssignment
 from backend.app.models.teacher_load import TeacherLoad
 from backend.app.models.time_slot import TimeSlot
@@ -26,6 +33,7 @@ class SchedulingTarget:
     teacher_id: int
     teacher_assignment_id: int
     resource_keys: tuple[tuple[str, int], ...]
+    student_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -131,6 +139,29 @@ def _load_lessons(
         .filter(
             Curriculum.academic_period_id == academic_period_id,
         )
+        .options(
+            selectinload(Lesson.targets).options(
+                selectinload(LessonTarget.teacher_assignment)
+                .selectinload(TeacherAssignment.teacher_load)
+                .selectinload(TeacherLoad.curriculum_subject)
+                .selectinload(CurriculumSubject.curriculum),
+                selectinload(LessonTarget.group).selectinload(Group.students),
+                selectinload(LessonTarget.subgroup)
+                .selectinload(Subgroup.students)
+                .selectinload(SubgroupStudent.student)
+                .selectinload(Student.group),
+                selectinload(LessonTarget.lecture_part)
+                .selectinload(LecturePart.students)
+                .selectinload(LecturePartStudent.student)
+                .selectinload(Student.group),
+                selectinload(LessonTarget.subgroup_bundle)
+                .selectinload(SubgroupBundle.members)
+                .selectinload(SubgroupBundleMember.subgroup)
+                .selectinload(Subgroup.students)
+                .selectinload(SubgroupStudent.student)
+                .selectinload(Student.group),
+            )
+        )
         .distinct()
         .order_by(
             Lesson.id,
@@ -151,18 +182,10 @@ def _load_lessons(
 
         for lesson_target in lesson.targets:
             scheduling_target = _build_scheduling_target(
-                db=db,
                 target=lesson_target,
             )
 
-            assignment = (
-                db.query(TeacherAssignment)
-                .filter(
-                    TeacherAssignment.id
-                    == scheduling_target.teacher_assignment_id,
-                )
-                .first()
-            )
+            assignment = lesson_target.teacher_assignment
 
             if assignment is None:
                 raise ValueError(
@@ -230,16 +253,9 @@ def _load_lessons(
 
 
 def _build_scheduling_target(
-    db: Session,
     target: LessonTarget,
 ) -> SchedulingTarget:
-    assignment = (
-        db.query(TeacherAssignment)
-        .filter(
-            TeacherAssignment.id == target.teacher_assignment_id,
-        )
-        .first()
-    )
+    assignment = target.teacher_assignment
 
     if assignment is None:
         raise ValueError(
@@ -271,6 +287,9 @@ def _build_scheduling_target(
             teacher_id=teacher_id,
             teacher_assignment_id=target.teacher_assignment_id,
             resource_keys=(("group", target.group_id),),
+            student_ids=tuple(
+                sorted(student.id for student in target.group.students)
+            ),
         )
 
     if target.target_type == "subgroup":
@@ -287,12 +306,9 @@ def _build_scheduling_target(
             student_count=target.subgroup.student_count,
             teacher_id=teacher_id,
             teacher_assignment_id=target.teacher_assignment_id,
-            resource_keys=(
-                ("subgroup", target.subgroup_id),
-                *tuple(
-                    ("group", student.student.group_id)
-                    for student in target.subgroup.students
-                ),
+            resource_keys=(("subgroup", target.subgroup_id),),
+            student_ids=tuple(
+                sorted(student.student_id for student in target.subgroup.students)
             ),
         )
 
@@ -310,25 +326,12 @@ def _build_scheduling_target(
             student_count=target.lecture_part.student_count,
             teacher_id=teacher_id,
             teacher_assignment_id=target.teacher_assignment_id,
-            resource_keys=(
-                ("lecture_part", target.lecture_part_id),
-                *tuple(
-                    ("group", student.student.group_id)
+            resource_keys=(("lecture_part", target.lecture_part_id),),
+            student_ids=tuple(
+                sorted(
+                    student.student_id
                     for student in target.lecture_part.students
-                ),
-                *tuple(
-                    ("subgroup", subgroup_id)
-                    for subgroup_id, in db.query(
-                        SubgroupStudent.subgroup_id
-                    ).filter(
-                        SubgroupStudent.student_id.in_(
-                            [
-                                student.student_id
-                                for student in target.lecture_part.students
-                            ]
-                        )
-                    ).distinct().all()
-                ),
+                )
             ),
         )
 
@@ -338,17 +341,11 @@ def _build_scheduling_target(
                 f"LessonTarget id={target.id}: "
                 "не найдено объединение подгрупп."
             )
-
         bundle = target.subgroup_bundle
         resource_keys = {
             ("subgroup", member.subgroup_id)
             for member in bundle.members
         }
-        resource_keys.update(
-            ("group", student.student.group_id)
-            for member in bundle.members
-            for student in member.subgroup.students
-        )
 
         return SchedulingTarget(
             target_type="subgroup_bundle",
@@ -358,6 +355,15 @@ def _build_scheduling_target(
             teacher_id=teacher_id,
             teacher_assignment_id=target.teacher_assignment_id,
             resource_keys=tuple(sorted(resource_keys)),
+            student_ids=tuple(
+                sorted(
+                    {
+                        student.student_id
+                        for member in bundle.members
+                        for student in member.subgroup.students
+                    }
+                )
+            ),
         )
 
     raise ValueError(

@@ -50,6 +50,7 @@ def create_lecture_parts_for_stream(
             == lecture_stream.id,
         )
         .order_by(
+            Student.group_id.asc(),
             Student.full_name.asc(),
             LectureStreamStudent.list_order.asc(),
         )

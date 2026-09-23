@@ -10,6 +10,7 @@ from backend.app.models.subject import Subject
 from backend.app.models.teacher import Teacher
 from backend.app.models.teacher_load import TeacherLoad
 from backend.app.models.curriculum_subject import CurriculumSubject
+from backend.app.models.curriculum import Curriculum
 from backend.app.models.scheduling_constraint import SchedulingConstraint
 from backend.app.models.lecture_stream import LectureStream
 from backend.app.models.lecture_stream_group import LectureStreamGroup
@@ -28,6 +29,7 @@ def get_catalog_overview(db: Session = Depends(get_db)):
     teachers = db.query(Teacher).order_by(Teacher.full_name).all()
     classrooms = db.query(Classroom).order_by(Classroom.name).all()
     curricula = db.query(CurriculumSubject).all()
+    curriculum_plans = db.query(Curriculum).order_by(Curriculum.id.desc()).all()
     loads = db.query(TeacherLoad).all()
     constraints = db.query(SchedulingConstraint).order_by(SchedulingConstraint.created_at.desc()).all()
     lecture_streams = db.query(LectureStream).filter(LectureStream.is_active.is_(True)).order_by(LectureStream.name).all()
@@ -53,6 +55,8 @@ def get_catalog_overview(db: Session = Depends(get_db)):
                 "academic_period_id": item.academic_period_id,
                 "specialty_id": item.specialty_id,
                 "group_ids": [link.group_id for link in item.groups],
+                "group_names": [link.group.name for link in item.groups if link.group],
+                "is_active": item.is_active,
             }
             for item in lecture_streams
         ],
@@ -87,14 +91,50 @@ def get_catalog_overview(db: Session = Depends(get_db)):
              "lab_hours": item.lab_hours}
             for item in curricula
         ],
+        "curriculum_plans": [
+            {
+                "id": item.id,
+                "specialty_id": item.specialty_id,
+                "specialty": item.specialty.code if item.specialty else None,
+                "academic_period_id": item.academic_period_id,
+                "academic_period_name": item.academic_period.name if item.academic_period else None,
+                "course": item.course,
+                "semester": item.semester,
+                "academic_year": item.academic_year,
+                "subjects_count": len(item.subjects),
+            }
+            for item in curriculum_plans
+        ],
         "qualifications": [
             {"id": item.id, "teacher_id": item.teacher_id,
              "teacher": item.teacher.full_name if item.teacher else None,
              "curriculum_subject_id": item.curriculum_subject_id,
              "subject": item.curriculum_subject.subject.name if item.curriculum_subject and item.curriculum_subject.subject else None,
              "lecture_hours": item.lecture_hours, "practice_hours": item.practice_hours,
-             "lab_hours": item.lab_hours}
+             "lab_hours": item.lab_hours,
+             "lecture_per_week": item.lecture_per_week,
+             "practice_per_week": item.practice_per_week,
+             "lab_per_week": item.lab_per_week,
+             "lecture_max_students": item.lecture_max_students,
+             "practice_max_students": item.practice_max_students,
+             "lab_max_students": item.lab_max_students,
+             "language": item.language}
             for item in loads
+        ],
+        "qualification_summary": [
+            {
+                "id": teacher.id,
+                "teacher_id": teacher.id,
+                "teacher": teacher.full_name,
+                "subjects": [
+                    load.curriculum_subject.subject.name
+                    for load in teacher.loads
+                    if load.curriculum_subject and load.curriculum_subject.subject
+                ],
+                "languages": sorted({load.language for load in teacher.loads}),
+                "loads_count": len(teacher.loads),
+            }
+            for teacher in teachers
         ],
         "constraints": [
             {"id": item.id, "constraint_type": item.constraint_type, "title": item.title,

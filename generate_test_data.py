@@ -23,6 +23,8 @@ from backend.app.models import (
     Subject,
     Teacher,
     TeacherLoad,
+    GenerationJob,
+    ScheduleVersion,
 )
 from backend.app.services.lesson_service import create_lessons_for_assignment
 from backend.app.services.subgroup_service import create_subgroups_for_stream
@@ -54,116 +56,144 @@ from backend.app.models.teacher_assignment_target import TeacherAssignmentTarget
 from backend.app.models.teacher_load import TeacherLoad
 
 RANDOM_SEED = 42
-
-MIN_GROUP_SIZE = 12
-MAX_GROUP_SIZE = 30
-MAX_GROUPS_PER_SPECIALTY = 9
-
+DEMO_SPECIALTY_CODE = "B057"
+DEMO_SPECIALTY_SHORT_NAME = "ИС"
+DEMO_EMAIL_DOMAIN = "demo.smartschedule.local"
+DEMO_CLASSROOM_NAMES = {
+    "101", "102", "103", "104", "201", "202",
+    "301", "302", "303", "304", "305", "401", "402",
+}
+ACADEMIC_WEEKS = 18
 
 SPECIALTY_DATA = [
-    ("B057", "ИС", "Информационные системы"),
-    ("B058", "КБ", "Кибербезопасность"),
-    ("B059", "ТУ", "Технологии искусственного интеллекта"),
+    (DEMO_SPECIALTY_CODE, DEMO_SPECIALTY_SHORT_NAME, "Информационные системы"),
 ]
 
-
 SUBJECT_DATA = [
-    ("INF101", "Информационные технологии"),
-    ("PROG101", "Программирование"),
-    ("MATH101", "Математика"),
-    ("DB101", "Базы данных"),
-    ("WEB101", "Веб-технологии"),
+    ("MATH101", "Математика", 4, 4, 0),
+    ("PROG101", "Программирование", 2, 2, 4),
+    ("DB101", "Базы данных", 2, 2, 2),
+    ("OS101", "Операционные системы", 2, 2, 2),
+    ("NET101", "Компьютерные сети", 2, 2, 2),
+    ("ALGO101", "Алгоритмы и структуры данных", 2, 4, 2),
+    ("SEC101", "Информационная безопасность", 2, 2, 2),
+    ("WEB101", "Веб-разработка", 2, 2, 4),
 ]
 
 
 TEACHER_DATA = [
-    ("Иванов Иван Иванович", "Старший преподаватель", "Кафедра ИС"),
-    ("Петров Петр Петрович", "Преподаватель", "Кафедра ИС"),
-    ("Сидорова Анна Сергеевна", "Доцент", "Кафедра ИС"),
-    ("Ким Алексей Владимирович", "Преподаватель", "Кафедра ИС"),
-    ("Ахметова Динара Маратовна", "Старший преподаватель", "Кафедра ИС"),
-    ("Нурланов Тимур Серикович", "Преподаватель", "Кафедра КБ"),
-    ("Ибраева Айжан Маратовна", "Доцент", "Кафедра КБ"),
-    ("Сериков Руслан Ерланович", "Преподаватель", "Кафедра ТУ"),
+    ("Иванова Анна Сергеевна", "Доцент", "Кафедра ИС"),
+    ("Петров Алексей Олегович", "Старший преподаватель", "Кафедра ИС"),
+    ("Сидоров Дмитрий Андреевич", "Преподаватель", "Кафедра ИС"),
+    ("Ким Алина Сериковна", "Доцент", "Кафедра ИС"),
+    ("Ахметов Руслан Маратович", "Старший преподаватель", "Кафедра ИС"),
+    ("Нурланова Дана Ерлановна", "Преподаватель", "Кафедра ИС"),
+    ("Омаров Ермек Бауыржанович", "Доцент", "Кафедра ИС"),
+    ("Серикова Анастасия Викторовна", "Преподаватель", "Кафедра ИС"),
 ]
 
 
 CLASSROOM_DATA = [
-    ("301", 30, "ordinary", None),
-    ("302", 28, "ordinary", "Проектор"),
-    ("303", 30, "computer_lab", "30 компьютеров"),
-    ("310", 30, "computer_lab", "30 компьютеров"),
-    ("311", 30, "computer_lab", "30 компьютеров"),
-    ("312", 30, "computer_lab", "30 компьютеров"),
-    ("304", 24, "computer_lab", "24 компьютера"),
-    ("305", 20, "computer_lab", "20 компьютеров"),
-    ("309", 16, "computer_lab", "16 компьютеров"),
-    ("306", 30, "ordinary", "Проектор"),
-    ("307", 25, "ordinary", None),
-    ("308", 30, "ordinary", "Проектор"),
-    ("LECTURE-101", 120, "ordinary", "Проектор"),
-    ("LECTURE-102", 120, "ordinary", "Проектор"),
+    ("101", 30, "ordinary", None),
+    ("102", 30, "ordinary", "Проектор"),
+    ("103", 25, "ordinary", None),
+    ("104", 28, "ordinary", "Проектор"),
+    ("201", 30, "ordinary", None),
+    ("202", 28, "ordinary", "Проектор"),
+    ("301", 14, "computer_lab", "14 компьютеров"),
+    ("302", 14, "computer_lab", "14 компьютеров"),
+    ("303", 14, "computer_lab", "14 компьютеров"),
+    ("304", 16, "computer_lab", "16 компьютеров"),
+    ("305", 16, "computer_lab", "16 компьютеров"),
+    ("401", 70, "ordinary", "Проектор"),
+    ("402", 70, "ordinary", "Проектор"),
 ]
 
-def reset_test_data(db: Session, prefix: str) -> None:
+def reset_demo_data(db: Session) -> None:
     print()
     print("=" * 70)
-    print(f"ОЧИСТКА ПРЕДЫДУЩЕГО ТЕСТОВОГО НАБОРА: {prefix}")
+    print("ОЧИСТКА ПРЕДЫДУЩЕГО ДЕМО-НАБОРА")
     print("=" * 70)
 
     specialty_ids = [
         row[0]
         for row in db.query(Specialty.id)
-        .filter(Specialty.code.like(f"{prefix}_%"))
+        .filter(
+            (Specialty.code.like("TEST%"))
+            | (Specialty.code == DEMO_SPECIALTY_CODE)
+            | (Specialty.name == "Информационные системы")
+        )
         .all()
     ]
 
     group_ids = [
         row[0]
         for row in db.query(Group.id)
-        .filter(Group.name.like(f"{prefix}-%"))
+        .filter(
+            (Group.name.like("TEST%"))
+            | (Group.name.like("ИС-%"))
+        )
         .all()
     ]
 
     student_ids = [
         row[0]
         for row in db.query(Student.id)
-        .filter(Student.full_name.like(f"{prefix}%"))
+        .filter(
+            (Student.full_name.like("TEST%"))
+            | (Student.group_id.in_(group_ids))
+        )
         .all()
     ]
 
     subject_ids = [
         row[0]
         for row in db.query(Subject.id)
-        .filter(Subject.code.like(f"{prefix}_%"))
+        .filter(
+            (Subject.code.like("TEST%"))
+            | (Subject.code.in_([code for code, *_ in SUBJECT_DATA]))
+        )
         .all()
     ]
 
     teacher_ids = [
         row[0]
         for row in db.query(Teacher.id)
-        .filter(Teacher.full_name.like(f"{prefix}%"))
+        .filter(
+            (Teacher.full_name.like("TEST%"))
+            | (Teacher.email.like(f"%@{DEMO_EMAIL_DOMAIN}"))
+        )
         .all()
     ]
 
     classroom_ids = [
         row[0]
         for row in db.query(Classroom.id)
-        .filter(Classroom.name.like(f"{prefix}-%"))
+        .filter(
+            (Classroom.name.like("TEST%"))
+            | (Classroom.name.in_(DEMO_CLASSROOM_NAMES))
+        )
         .all()
     ]
 
     academic_period_ids = [
         row[0]
         for row in db.query(AcademicPeriod.id)
-        .filter(AcademicPeriod.name.like(f"{prefix}%"))
+        .filter(
+            (AcademicPeriod.name.like("TEST%"))
+            | (AcademicPeriod.name == "2026/2027 — 1 семестр")
+            | (AcademicPeriod.name == "1 семестр 2026-2027")
+        )
         .all()
     ]
 
     curriculum_ids = [
         row[0]
         for row in db.query(Curriculum.id)
-        .filter(Curriculum.specialty_id.in_(specialty_ids))
+        .filter(
+            (Curriculum.specialty_id.in_(specialty_ids))
+            | (Curriculum.academic_period_id.in_(academic_period_ids))
+        )
         .all()
     ]
 
@@ -173,6 +203,15 @@ def reset_test_data(db: Session, prefix: str) -> None:
         .filter(LectureStream.specialty_id.in_(specialty_ids))
         .all()
     ]
+    legacy_stream_ids = [
+        row[0]
+        for row in db.query(LectureStream.id)
+        .filter(LectureStream.name.like("ИС-% / ИС-%"))
+        .all()
+    ]
+    lecture_stream_ids = sorted(
+        set(lecture_stream_ids).union(legacy_stream_ids)
+    )
 
     subgroup_set_ids = [
         row[0]
@@ -219,6 +258,21 @@ def reset_test_data(db: Session, prefix: str) -> None:
         .distinct()
         .all()
     ]
+
+    if academic_period_ids:
+        period_version_ids = [
+            row[0]
+            for row in db.query(ScheduleVersion.id)
+            .filter(ScheduleVersion.academic_period_id.in_(academic_period_ids))
+            .all()
+        ]
+        db.query(GenerationJob).filter(
+            GenerationJob.academic_period_id.in_(academic_period_ids)
+        ).delete(synchronize_session=False)
+        if period_version_ids:
+            db.query(ScheduleVersion).filter(
+                ScheduleVersion.id.in_(period_version_ids)
+            ).delete(synchronize_session=False)
 
     if lesson_ids:
         db.query(LessonTarget).filter(
@@ -314,9 +368,22 @@ def reset_test_data(db: Session, prefix: str) -> None:
         ).delete(synchronize_session=False)
 
     if specialty_ids:
-        db.query(Specialty).filter(
-            Specialty.id.in_(specialty_ids)
-        ).delete(synchronize_session=False)
+        removable_specialty_ids = [
+            specialty_id
+            for specialty_id in specialty_ids
+            if db.query(Group.id)
+            .filter(Group.specialty_id == specialty_id)
+            .first()
+            is None
+            and db.query(Curriculum.id)
+            .filter(Curriculum.specialty_id == specialty_id)
+            .first()
+            is None
+        ]
+        if removable_specialty_ids:
+            db.query(Specialty).filter(
+                Specialty.id.in_(removable_specialty_ids)
+            ).delete(synchronize_session=False)
 
     if academic_period_ids:
         db.query(AcademicPeriod).filter(
@@ -332,102 +399,12 @@ def parse_args() -> argparse.Namespace:
         description="Генерация тестовых данных SmartSchedule AI."
     )
 
-    parser.add_argument(
-        "--students",
-        type=int,
-        choices=[200, 400],
-        default=200,
-        help="Количество студентов: 200 или 400.",
-    )
-
     return parser.parse_args()
 
 
-def calculate_group_sizes(
-    student_count: int,
-) -> list[int]:
-    group_count = (
-        student_count + MAX_GROUP_SIZE - 1
-    ) // MAX_GROUP_SIZE
-
-    if group_count > MAX_GROUPS_PER_SPECIALTY:
-        raise ValueError(
-            f"Для {student_count} студентов требуется "
-            f"{group_count} групп. "
-            f"Максимум: {MAX_GROUPS_PER_SPECIALTY}."
-        )
-
-    while (
-        group_count > 1
-        and student_count / group_count < MIN_GROUP_SIZE
-    ):
-        group_count -= 1
-
-    base_size = student_count // group_count
-    remainder = student_count % group_count
-
-    sizes = []
-
-    for index in range(group_count):
-        size = base_size + (
-            1 if index < remainder else 0
-        )
-
-        if not (
-            MIN_GROUP_SIZE
-            <= size
-            <= MAX_GROUP_SIZE
-        ):
-            raise ValueError(
-                f"Недопустимый размер группы: {size}."
-            )
-
-        sizes.append(size)
-
-    return sizes
-
-
-def get_specialty_student_counts(
-    total_students: int,
-) -> dict[str, int]:
-    """
-    Распределение студентов:
-
-    200:
-        ИС = 100
-        КБ = 50
-        ТУ = 50
-
-    400:
-        ИС = 200
-        КБ = 100
-        ТУ = 100
-    """
-
-    information_systems = total_students // 2
-    cybersecurity = total_students // 4
-    ai = (
-        total_students
-        - information_systems
-        - cybersecurity
-    )
-
-    return {
-        "ИС": information_systems,
-        "КБ": cybersecurity,
-        "ТУ": ai,
-    }
-
-
-def create_academic_period(
-    db: Session,
-    total_students: int,
-) -> AcademicPeriod:
+def create_academic_period(db: Session) -> AcademicPeriod:
     period = AcademicPeriod(
-        name=(
-            f"TEST{total_students} — "
-            "2026/2027 — 1 семестр"
-        ),
+        name="2026/2027 — 1 семестр",
         academic_year="2026-2027",
         semester=1,
         start_date=date(2026, 9, 1),
@@ -441,19 +418,13 @@ def create_academic_period(
     return period
 
 
-def create_specialties(
-    db: Session,
-    total_students: int,
-) -> list[Specialty]:
+def create_specialties(db: Session) -> list[tuple[Specialty, str]]:
     specialties = []
 
     for code, short_name, name in SPECIALTY_DATA:
         specialty = Specialty(
-            code=f"TEST{total_students}_{code}",
-            name=(
-                f"TEST{total_students} — "
-                f"{name}"
-            ),
+            code=code,
+            name=name,
         )
 
         db.add(specialty)
@@ -472,66 +443,55 @@ def create_specialties(
 def create_groups_and_students(
     db: Session,
     specialties: list[tuple[Specialty, str]],
-    total_students: int,
 ) -> tuple[list[Group], list[Student]]:
     groups: list[Group] = []
     students: list[Student] = []
 
-    specialty_counts = get_specialty_student_counts(
-        total_students
-    )
-
-    student_number = 1
-
-    for specialty, short_name in specialties:
-        specialty_student_count = specialty_counts[
-            short_name
-        ]
-
-        group_sizes = calculate_group_sizes(
-            specialty_student_count
+    specialty = specialties[0][0]
+    group_data = [
+        ("ИС-41", 24, "Казахский"),
+        ("ИС-42", 24, "Русский"),
+        ("ИС-43", 25, "Казахский"),
+        ("ИС-44", 25, "Русский"),
+        ("ИС-45", 24, "Казахский"),
+        ("ИС-46", 24, "Русский"),
+        ("ИС-47", 25, "Казахский"),
+    ]
+    surnames = [
+        "Абдрахманов", "Ахметова", "Бекетов", "Сарсенова",
+        "Нурланов", "Омарова", "Касымов", "Иванова",
+        "Петров", "Ким", "Серикова", "Жумабаев",
+    ]
+    names = [
+        "Алихан", "Аружан", "Данияр", "Алина", "Рустам",
+        "Дана", "Мирас", "Анна", "Алексей", "Айдана",
+        "Ермек", "Анастасия",
+    ]
+    student_number = 0
+    for group_name, group_size, language in group_data:
+        group = Group(
+            name=group_name,
+            specialty_id=specialty.id,
+            course=4,
+            language=language,
+            student_count=group_size,
         )
-
-        for group_number, group_size in enumerate(
-            group_sizes,
-            start=1,
-        ):
-            if group_number % 2 == 1:
-                language = "Казахский"
-            else:
-                language = "Русский"
-
-            group = Group(
-                name=(
-                    f"TEST{total_students}-"
-                    f"{short_name}-"
-                    f"{group_number:02d}"
+        db.add(group)
+        db.flush()
+        groups.append(group)
+        for index in range(group_size):
+            suffix = student_number // len(surnames) + 1
+            student = Student(
+                full_name=(
+                    f"{surnames[student_number % len(surnames)]} "
+                    f"{names[student_number % len(names)]}"
+                    f"{f' {suffix}' if suffix > 1 else ''}"
                 ),
-                specialty_id=specialty.id,
-                course=1,
-                language=language,
-                student_count=group_size,
+                group_id=group.id,
             )
-
-            db.add(group)
-            db.flush()
-
-            groups.append(group)
-
-            for _ in range(group_size):
-                student = Student(
-                    full_name=(
-                        f"TEST{total_students} "
-                        f"Студент "
-                        f"{student_number:04d}"
-                    ),
-                    group_id=group.id,
-                )
-
-                db.add(student)
-                students.append(student)
-
-                student_number += 1
+            db.add(student)
+            students.append(student)
+            student_number += 1
 
     db.flush()
 
@@ -544,7 +504,6 @@ def create_lecture_streams(
     specialties: list[tuple[Specialty, str]],
     groups: list[Group],
     students: list[Student],
-    total_students: int,
 ) -> list[LectureStream]:
     streams: list[LectureStream] = []
 
@@ -558,14 +517,6 @@ def create_lecture_streams(
             student.group_id,
             [],
         ).append(student)
-
-    specialty_by_id = {
-        specialty.id: (
-            specialty,
-            short_name,
-        )
-        for specialty, short_name in specialties
-    }
 
     groups_by_specialty_language: dict[
         tuple[int, str],
@@ -600,11 +551,7 @@ def create_lecture_streams(
                 continue
 
             stream = LectureStream(
-                name=(
-                    f"TEST{total_students} — "
-                    f"{short_name} — "
-                    f"{language}"
-                ),
+                name=f"ИС — {language} поток",
                 specialty_id=specialty.id,
                 academic_period_id=period.id,
                 is_active=True,
@@ -648,17 +595,13 @@ def create_lecture_streams(
 
 def create_subjects(
     db: Session,
-    total_students: int,
 ) -> list[Subject]:
     subjects = []
 
-    for code, name in SUBJECT_DATA:
+    for code, name, _, _, _ in SUBJECT_DATA:
         subject = Subject(
-            code=f"TEST{total_students}_{code}",
-            name=(
-                f"TEST{total_students} — "
-                f"{name}"
-            ),
+            code=code,
+            name=name,
         )
 
         db.add(subject)
@@ -680,7 +623,7 @@ def create_curricula(
     for specialty, _ in specialties:
         curriculum = Curriculum(
             specialty_id=specialty.id,
-            course=1,
+            course=4,
             semester=1,
             academic_year="2026-2027",
             academic_period_id=period.id,
@@ -691,43 +634,31 @@ def create_curricula(
 
         curricula.append(curriculum)
 
+        load_by_code = {
+            code: (lecture, practice, lab)
+            for code, _, lecture, practice, lab in SUBJECT_DATA
+        }
         for subject in subjects:
-            if subject.code.endswith("PROG101"):
-                lecture_hours = 36
-                practice_hours = 0
-                lab_hours = 36
+            lecture_hours, practice_hours, lab_hours = load_by_code[
+                subject.code
+            ]
 
-            elif subject.code.endswith("DB101"):
-                lecture_hours = 36
-                practice_hours = 0
-                lab_hours = 36
-
-            else:
-                lecture_hours = 36
-                practice_hours = 36
-                lab_hours = 0
-
+            weeks = period.weeks
             curriculum_subject = CurriculumSubject(
                 curriculum_id=curriculum.id,
                 subject_id=subject.id,
                 hours=(
-                    lecture_hours
-                    + practice_hours
-                    + lab_hours
+                    (lecture_hours + practice_hours + lab_hours) * weeks
                 ),
-                lecture_hours=lecture_hours,
-                practice_hours=practice_hours,
-                lab_hours=lab_hours,
-                lecture_per_week=2,
-                practice_per_week=(
-                    2 if practice_hours > 0 else 0
-                ),
-                lab_per_week=(
-                    2 if lab_hours > 0 else 0
-                ),
+                lecture_hours=lecture_hours * weeks,
+                practice_hours=practice_hours * weeks,
+                lab_hours=lab_hours * weeks,
+                lecture_per_week=lecture_hours,
+                practice_per_week=practice_hours,
+                lab_per_week=lab_hours,
                 lecture_max_students=70,
                 practice_max_students=30,
-                lab_max_students=30,
+                lab_max_students=16,
             )
 
             db.add(curriculum_subject)
@@ -739,7 +670,6 @@ def create_curricula(
 
 def create_teachers(
     db: Session,
-    total_students: int,
 ) -> list[Teacher]:
     teachers = []
 
@@ -749,17 +679,10 @@ def create_teachers(
         department,
     ) in enumerate(TEACHER_DATA, start=1):
         teacher = Teacher(
-            full_name=(
-                f"TEST{total_students} — "
-                f"{full_name}"
-            ),
+            full_name=full_name,
             position=position,
             department=department,
-            email=(
-                f"test{total_students}"
-                f".teacher{index}"
-                f"@smartschedule.local"
-            ),
+            email=f"teacher{index}@{DEMO_EMAIL_DOMAIN}",
             is_active=True,
         )
 
@@ -791,24 +714,24 @@ def create_teacher_loads(
         teacher = teachers[
             index % len(teachers)
         ]
+        # One lecture assignment is created for every language and
+        # lecture part, while the curriculum stores the subject's
+        # weekly value once.
+        lecture_per_week = curriculum_subject.lecture_per_week * 4
 
         load = TeacherLoad(
             teacher_id=teacher.id,
             curriculum_subject_id=(
                 curriculum_subject.id
             ),
-            lecture_hours=(
-                curriculum_subject.lecture_hours
-            ),
+            lecture_hours=lecture_per_week * ACADEMIC_WEEKS,
             practice_hours=(
                 curriculum_subject.practice_hours
             ),
             lab_hours=(
                 curriculum_subject.lab_hours
             ),
-            lecture_per_week=(
-                curriculum_subject.lecture_per_week
-            ),
+            lecture_per_week=lecture_per_week,
             practice_per_week=(
                 curriculum_subject.practice_per_week
             ),
@@ -936,6 +859,7 @@ def create_assignments_and_lessons(
                 load.lecture_per_week
                 // len(languages)
             )
+            lecture_hours //= len(lecture_parts_by_stream[stream.id])
 
             if lecture_hours <= 0:
                 raise ValueError(
@@ -955,28 +879,24 @@ def create_assignments_and_lessons(
 
                 lecture_parts = lecture_parts_by_stream[stream.id]
 
-                assignment = create_teacher_assignment(
-                    db=db,
-                    teacher_load_id=load.id,
-                    target_type="lecture_part",
-                    lecture_hours=lecture_hours,
-                    practice_hours=0,
-                    lab_hours=0,
-                    targets=[
-                        {
+                for part in lecture_parts:
+                    assignment = create_teacher_assignment(
+                        db=db,
+                        teacher_load_id=load.id,
+                        target_type="lecture_part",
+                        lecture_hours=lecture_hours,
+                        practice_hours=0,
+                        lab_hours=0,
+                        targets=[{
                             "target_type": "lecture_part",
                             "lecture_part_id": part.id,
-                        }
-                        for part in lecture_parts
-                    ],
-                )
-
-                lessons = create_lessons_for_assignment(
-                    db=db,
-                    assignment=assignment,
-                )
-
-                lessons_created += len(lessons)
+                        }],
+                    )
+                    lessons = create_lessons_for_assignment(
+                        db=db,
+                        assignment=assignment,
+                    )
+                    lessons_created += len(lessons)
 
         # -------------------------------------------------
         # Практика / лабораторные.
@@ -1014,77 +934,50 @@ def create_assignments_and_lessons(
                     load.practice_per_week
                 )
 
-                lab_hours = load.lab_hours
                 lab_hours = load.lab_per_week
 
-                if practice_hours > 0:
+                practice_assignment_hours = practice_hours // len(languages)
+                lab_assignment_hours = lab_hours // len(languages)
+                subgroup_chunks = [
+                    subgroups[index:index + 5]
+                    for index in range(0, len(subgroups), 5)
+                ]
+                practice_base = practice_assignment_hours // len(subgroup_chunks)
+                practice_extra = practice_assignment_hours % len(subgroup_chunks)
+                lab_base = lab_assignment_hours // len(subgroup_chunks)
+                lab_extra = lab_assignment_hours % len(subgroup_chunks)
+                for chunk_index, subgroup_chunk in enumerate(subgroup_chunks):
+                    chunk_practice_hours = practice_base + (
+                        1 if chunk_index < practice_extra else 0
+                    )
+                    chunk_lab_hours = lab_base + (
+                        1 if chunk_index < lab_extra else 0
+                    )
+                    if chunk_practice_hours <= 0 and chunk_lab_hours <= 0:
+                        continue
                     assignment = create_teacher_assignment(
                         db=db,
                         teacher_load_id=load.id,
                         target_type="subgroup",
                         lecture_hours=0,
-                        practice_hours=(
-                            practice_hours
-                            // len(languages)
-                        ),
-                        lab_hours=0,
-                        targets=[
-                            {
-                                "target_type": "subgroup",
-                                "subgroup_id": subgroup.id,
-                            }
-                            for subgroup in subgroups
-                        ],
+                        practice_hours=chunk_practice_hours,
+                        lab_hours=chunk_lab_hours,
+                        targets=[{
+                            "target_type": "subgroup",
+                            "subgroup_id": subgroup.id,
+                        } for subgroup in subgroup_chunk],
                     )
-
-                    lessons = (
-                        create_lessons_for_assignment(
-                            db=db,
-                            assignment=assignment,
-                        )
-                    )
-
-                    lessons_created += len(
-                        lessons
-                    )
-
-                if lab_hours > 0:
-                    assignment = create_teacher_assignment(
+                    lessons = create_lessons_for_assignment(
                         db=db,
-                        teacher_load_id=load.id,
-                        target_type="subgroup",
-                        lecture_hours=0,
-                        practice_hours=0,
-                        lab_hours=(
-                            lab_hours
-                            // len(languages)
-                        ),
-                        targets=[
-                            {
-                                "target_type": "subgroup",
-                                "subgroup_id": subgroup.id,
-                            }
-                            for subgroup in subgroups
-                        ],
+                        assignment=assignment,
                     )
-
-                    lessons = (
-                        create_lessons_for_assignment(
-                            db=db,
-                            assignment=assignment,
-                        )
-                    )
-
-                    lessons_created += len(
-                        lessons
-                    )
+                    lessons_created += len(lessons)
 
     return lessons_created
 
 
 def create_classrooms(
     db: Session,
-    total_students: int,
 ) -> list[Classroom]:
     classrooms = []
 
@@ -1098,9 +991,7 @@ def create_classrooms(
         start=1,
     ):
         classroom = Classroom(
-            name=(
-                f"TEST{total_students}-{name}"
-            ),
+            name=name,
             capacity=capacity,
             room_type=room_type,
             equipment=equipment,
@@ -1157,42 +1048,32 @@ def main() -> None:
 
     random.seed(RANDOM_SEED)
 
-    total_students = args.students
-    test_prefix = f"TEST{total_students}"
-
     print("=" * 70)
-    print(
-        "SmartSchedule AI — генератор тестовых данных"
-    )
+    print("SmartSchedule AI — генератор демонстрационных данных")
     print("=" * 70)
     print(
         f"Размер тестового набора: "
-        f"{total_students} студентов"
+        "171 студент, специальность «Информационные системы»"
     )
     print(
-        f"Перед генерацией будет очищен предыдущий набор "
-        f"{test_prefix}."
+        "Перед генерацией будет очищен предыдущий набор "
+        "SmartSchedule Demo."
     )
     print()
 
     db = SessionLocal()
 
     try:
-        reset_test_data(
-            db=db,
-            prefix=test_prefix,
-        )
+        reset_demo_data(db=db)
 
         print("[1/10] Академический период...")
         period = create_academic_period(
             db,
-            total_students,
         )
 
         print("[2/10] Специальности...")
         specialties = create_specialties(
             db,
-            total_students,
         )
 
         print("[3/10] Группы и студенты...")
@@ -1200,7 +1081,6 @@ def main() -> None:
             create_groups_and_students(
                 db=db,
                 specialties=specialties,
-                total_students=total_students,
             )
         )
 
@@ -1211,7 +1091,6 @@ def main() -> None:
             specialties=specialties,
             groups=groups,
             students=students,
-            total_students=total_students,
         )
 
         print("[4.5/10] Части лекционных потоков...")
@@ -1227,7 +1106,6 @@ def main() -> None:
         print("[5/10] Предметы...")
         subjects = create_subjects(
             db,
-            total_students,
         )
 
         print("[6/10] Учебные планы...")
@@ -1241,7 +1119,6 @@ def main() -> None:
         print("[7/10] Преподаватели...")
         teachers = create_teachers(
             db,
-            total_students,
         )
 
         print("[8/10] Нагрузка преподавателей...")
@@ -1277,7 +1154,6 @@ def main() -> None:
 
         classrooms = create_classrooms(
             db,
-            total_students,
         )
 
         db.commit()
@@ -1327,7 +1203,7 @@ def main() -> None:
 
         print()
         print(
-            "Тестовый набор сохранён в PostgreSQL."
+            "Демонстрационный набор сохранён в PostgreSQL."
         )
 
     except Exception:

@@ -71,7 +71,7 @@ def delete_group(group_id: int, db: Session = Depends(get_db)):
     if group is None:
         raise HTTPException(status_code=404, detail="Группа не найдена")
     if group.students or group.teacher_assignments:
-        raise HTTPException(status_code=400, detail="Нельзя удалить группу с привязанными данными")
+        raise HTTPException(status_code=409, detail="Нельзя удалить группу с привязанными студентами или назначениями преподавателей.")
     db.delete(group)
     db.commit()
 

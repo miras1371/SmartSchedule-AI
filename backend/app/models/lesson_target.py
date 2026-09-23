@@ -147,3 +147,9 @@ class LessonTarget(Base):
         "Classroom",
         back_populates="lesson_targets",
     )
+
+    schedule_classroom_assignments = relationship(
+        "ScheduleItemClassroom",
+        back_populates="lesson_target",
+        cascade="all, delete-orphan",
+    )

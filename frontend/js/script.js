@@ -20,6 +20,11 @@ const profilePanel = $("#profile-panel");
 const generationPanel = $("#generation-panel");
 const versionsPanel = $("#versions-panel");
 const scheduleCard = $(".schedule-card");
+const scheduleToolbar = $(".schedule-toolbar");
+const scheduleStats = $(".stats-grid");
+const scheduleStatus = $("#status");
+const scheduleLegend = $(".schedule-legend");
+const generateButton = $("#generate-button");
 const managementTitle = $("#management-title");
 const managementDescription = $("#management-description");
 const managementSummary = $("#management-summary");
@@ -60,11 +65,23 @@ const screenConfig = {
   constraints: ["Ограничения", "Пользовательские запреты для преподавателей и аудиторий", "constraints"],
   analytics: ["Аналитика", "Сводка по расписаниям и ресурсам", "analytics"],
 };
-const state = { items: [], overview: null, activeView: "week", zoom: 100, preferredVersionId: null };
+const state = { items: [], overview: null, activeView: "week", zoom: 100, preferredVersionId: null, selectedUnit: "" };
 let activeManagementScreen = null;
 let activeStudentId = null;
 let activeClassroomId = null;
 let currentUser = null;
+
+function applyScheduleZoom() {
+  const wrapper = scheduleBody.closest(".schedule-wrapper");
+  if (!wrapper) return;
+  wrapper.dataset.zoom = String(state.zoom);
+  const resetButton = $("#zoom-reset-button");
+  if (resetButton) resetButton.textContent = `${state.zoom}%`;
+  const zoomOutButton = $("#zoom-out-button");
+  const zoomInButton = $("#zoom-in-button");
+  if (zoomOutButton) zoomOutButton.disabled = state.zoom <= 75;
+  if (zoomInButton) zoomInButton.disabled = state.zoom >= 130;
+}
 
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[char]));
@@ -94,6 +111,9 @@ const statusLabel = (value) => ({ draft: "Черновик", generated: "Сге�
 function setPanel(panel) {
   [generationPanel, versionsPanel, managementPanel, profilePanel].forEach((item) => item.classList.remove("active"));
   scheduleCard.style.display = panel === "schedule" ? "" : "none";
+  [scheduleToolbar, scheduleStats, scheduleStatus, scheduleLegend, generateButton].forEach((item) => {
+    if (item) item.style.display = panel === "schedule" ? "" : "none";
+  });
   if (panel === "generation") generationPanel.classList.add("active");
   if (panel === "versions") versionsPanel.classList.add("active");
   if (panel === "management") managementPanel.classList.add("active");
@@ -106,7 +126,10 @@ function renderTable(items) {
   for (const item of items) {
     const names = new Map();
     item.targets.forEach((target) => (target.group_ids || []).forEach((id, index) => {
-      if (!selected || String(id) === String(selected)) names.set(String(id), target.group_names?.[index] || `Группа ${id}`);
+      const selectedGroup = selected.startsWith("group:") && String(id) === selected.slice(6);
+      const stream = state.overview?.lecture_streams.find((candidate) => candidate.group_ids.includes(id));
+      const selectedStream = selected.startsWith("stream:") && stream?.id === Number(selected.slice(7));
+      if (!selected || selectedGroup || selectedStream) names.set(String(id), target.group_names?.[index] || `Группа ${id}`);
     }));
     if (!names.size && !selected) names.set("none", "Без группы");
     names.forEach((name, id) => {
@@ -157,21 +180,32 @@ function openLesson(item) {
 }
 function updateGroups(items) {
   const values = new Map();
-  items.forEach((item) => item.targets.forEach((target) => (target.group_ids || []).forEach((id, index) => values.set(String(id), target.group_names?.[index] || `Группа ${id}`))));
+  (state.overview?.groups || []).forEach((group) => values.set(`group:${group.id}`, group.name));
   const selected = groupSelect.value;
-  groupSelect.replaceChildren(new Option("Все группы", ""));
-  [...values.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([id, name]) => groupSelect.add(new Option(name, id)));
+  groupSelect.replaceChildren(new Option("Все группы и потоки", ""));
+  const groups = document.createElement("optgroup");
+  groups.label = "Группы";
+  [...values.entries()].sort((a, b) => a[1].localeCompare(b[1])).forEach(([id, name]) => groups.appendChild(new Option(name, id)));
+  groupSelect.appendChild(groups);
+  const streams = document.createElement("optgroup");
+  streams.label = "Лекционные потоки";
+  (state.overview?.lecture_streams || []).forEach((stream) => streams.appendChild(new Option(stream.name, `stream:${stream.id}`)));
+  groupSelect.appendChild(streams);
   groupSelect.value = selected;
 }
 async function loadSchedule() {
   if (!versionSelect.value) return;
-  const query = groupSelect.value ? `?group_id=${groupSelect.value}` : "";
-  const data = await api(`/schedules/${versionSelect.value}${query}`);
+  if (!state.overview) state.overview = await api("/catalog/overview");
+  const data = await api(`/schedules/${versionSelect.value}`);
   state.items = data.items; updateGroups(data.items); renderTable(filteredItems()); setStatus(`Загружено занятий: ${data.count}`);
 }
 function filteredItems() {
   const query = searchInput.value.trim().toLocaleLowerCase();
-  return query ? state.items.filter((item) => [item.subject?.name, item.teacher?.full_name, ...item.targets.flatMap((target) => target.group_names || [])].filter(Boolean).join(" ").toLocaleLowerCase().includes(query)) : state.items;
+  return state.items.filter((item) => {
+    const matchesDay = state.activeView !== "day" || String(item.time_slot.day_of_week) === String(daySelect.value);
+    const text = [item.subject?.name, item.teacher?.full_name, ...item.targets.flatMap((target) => target.group_names || [])].filter(Boolean).join(" ").toLocaleLowerCase();
+    return matchesDay && (!query || text.includes(query));
+  });
 }
 async function loadVersions() {
   const period = semesterSelect.value;
@@ -184,6 +218,7 @@ async function loadVersions() {
   if (data.versions.length) { versionSelect.value = String(data.versions.find((v) => String(v.id) === String(state.preferredVersionId))?.id || data.versions[0].id); state.preferredVersionId = null; await loadSchedule(); }
 }
 async function loadPeriods() {
+  state.overview = await api("/catalog/overview");
   const data = await api("/schedules/versions");
   const periods = new Map(data.versions.map((version) => [version.academic_period_id, version.academic_period_name]));
   semesterSelect.replaceChildren();
@@ -498,6 +533,12 @@ entityForm.addEventListener("submit", async (event) => {
 $("#export-excel-button").addEventListener("click", exportCsv);
 $("#export-pdf-button").addEventListener("click", () => window.print());
 $("#logout-button")?.addEventListener("click", logout);
+const mobileMenuButton = $("#mobile-menu");
+const sidebarBackdrop = $("#sidebar-backdrop");
+const closeMobileNavigation = () => document.body.classList.remove("sidebar-open");
+mobileMenuButton?.addEventListener("click", () => document.body.classList.toggle("sidebar-open"));
+sidebarBackdrop?.addEventListener("click", closeMobileNavigation);
+document.querySelectorAll(".sidebar .nav-item").forEach((link) => link.addEventListener("click", closeMobileNavigation));
 profileMenuButton?.addEventListener("click", () => showScreen("profile").catch((error) => setStatus(error.message, true)));
 topbarProfileButton?.addEventListener("click", () => showScreen("profile").catch((error) => setStatus(error.message, true)));
 profileLogoutButton?.addEventListener("click", logout);
@@ -536,6 +577,10 @@ $("#versions-list").addEventListener("click", async (event) => { const button = 
 lessonModal.querySelectorAll("[data-close-modal]").forEach((element) => element.addEventListener("click", () => { lessonModal.hidden = true; }));
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") lessonModal.hidden = true; });
 document.querySelectorAll("[data-view]").forEach((button) => button.addEventListener("click", () => { state.activeView = button.dataset.view; document.querySelectorAll("[data-view]").forEach((item) => item.classList.toggle("active", item === button)); dayFilter.hidden = state.activeView !== "day"; renderTable(filteredItems()); }));
+$("#zoom-out-button")?.addEventListener("click", () => { state.zoom = Math.max(75, state.zoom - 15); applyScheduleZoom(); });
+$("#zoom-in-button")?.addEventListener("click", () => { state.zoom = Math.min(130, state.zoom + 15); applyScheduleZoom(); });
+$("#zoom-reset-button")?.addEventListener("click", () => { state.zoom = 100; applyScheduleZoom(); });
+applyScheduleZoom();
 if (!localStorage.getItem(tokenKey)) window.location.href = "login.html";
 loadPeriods().catch((error) => setStatus(`Не удалось подключиться к API: ${error.message}`, true));
 function applyTheme(theme) {

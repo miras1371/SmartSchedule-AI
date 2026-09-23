@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKey, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.core.database import Base
@@ -87,6 +87,13 @@ class TeacherLoad(Base):
     lab_max_students: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
+    )
+
+    language: Mapped[str] = mapped_column(
+        String(50),
+        default="Русский",
+        server_default="Русский",
+        nullable=False,
     )
 
     created_at: Mapped[datetime] = mapped_column(

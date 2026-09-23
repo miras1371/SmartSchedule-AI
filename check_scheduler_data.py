@@ -1,14 +1,29 @@
+import argparse
+
 from backend.app.core.database import SessionLocal
 from backend.app.scheduler.data_loader import load_scheduling_data
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Проверка загруженных данных расписания.",
+    )
+    parser.add_argument(
+        "--academic-period-id",
+        type=int,
+        required=True,
+    )
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
     db = SessionLocal()
 
     try:
         data = load_scheduling_data(
             db,
-            academic_period_id=10,
+            academic_period_id=args.academic_period_id,
         )
 
         print("=== ДАННЫЕ ДЛЯ ПЛАНИРОВЩИКА ===")

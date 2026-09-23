@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from backend.app.models.academic_period import AcademicPeriod
 from backend.app.models.lesson_target import LessonTarget
 from backend.app.models.schedule_item import ScheduleItem
+from backend.app.models.schedule_item_classroom import ScheduleItemClassroom
 from backend.app.models.schedule_version import ScheduleVersion
 from backend.app.scheduler.data_loader import (
     SchedulingData,
@@ -47,13 +48,18 @@ class ScheduleGenerator:
     - аудитория соответствует вместимости;
     - лаборатория проводится только в computer_lab;
     - преподаватель не может вести два занятия одновременно;
+    - студент не может посещать два занятия одновременно;
+    - у студента не может быть больше 6 занятий в день;
     - группа/подгруппа не может посещать два занятия одновременно;
-    - аудитория не может использоваться двумя target одновременно;
-    - два target одного занятия не могут использовать одну аудиторию.
+    - аудитория не может использоваться двумя занятиями одновременно;
+    - цели лекции находятся вместе, цели практики/лабораторной — раздельно.
 
-    После успешной базовой генерации можно добавлять дополнительные
-    soft constraints и оптимизацию окон.
+    Время занятий и аудитории оптимизируются последовательно: сначала
+    удобство студентов, затем заполненность и баланс помещений.
     """
+
+    MAX_STUDENT_LESSONS_PER_DAY = 6
+
 
     def __init__(
         self,
@@ -104,6 +110,8 @@ class ScheduleGenerator:
             tuple[str, int],
             list[int],
         ] = defaultdict(list)
+
+        self.student_lessons: dict[int, list[int]] = defaultdict(list)
 
         self.slot_day: dict[int, int] = {}
         self.slot_number: dict[int, int] = {}
@@ -159,9 +167,17 @@ class ScheduleGenerator:
 
         print("[Scheduler] OK: ограничения групп/подгрупп")
 
+        self._add_student_conflicts_and_daily_limit()
+
+        print("[Scheduler] OK: ограничения студентов и дневной лимит")
+
         self._add_classroom_conflicts()
 
         print("[Scheduler] OK: ограничения аудиторий")
+
+        # Hard constraints are complete at this point; only then apply
+        # the deterministic soft objective to choose the better solution.
+        self._add_objective()
 
         print(
             f"[Scheduler] Занятий: {len(self.data.lessons)}"
@@ -198,15 +214,25 @@ class ScheduleGenerator:
             cp_model.OPTIMAL,
             cp_model.FEASIBLE,
         ):
+            explanation = (
+                "Проверьте доступные временные слоты, конфликты "
+                "преподавателей/групп и подходящие аудитории."
+            )
             raise ValueError(
                 "OR-Tools не смог построить допустимое расписание. "
-                f"Статус solver: {solver.StatusName(status)}."
+                f"Статус solver: {solver.StatusName(status)}. "
+                f"{explanation}"
             )
 
         # --------------------------------------------------------
         # 7. Извлечение решения
         # --------------------------------------------------------
         placements = self._extract_solution()
+
+        # Classroom choice is optimized only after lesson times are fixed.
+        # This keeps room efficiency from competing with student convenience
+        # during the much larger timetable search.
+        placements = self._optimize_classroom_assignments(placements)
 
         # --------------------------------------------------------
         # 8. Сохранение
@@ -275,6 +301,7 @@ class ScheduleGenerator:
 
         self.teacher_lessons = defaultdict(list)
         self.resource_lessons = defaultdict(list)
+        self.student_lessons = defaultdict(list)
         self.target_resource_key = {}
 
         for lesson in self.data.lessons:
@@ -302,6 +329,11 @@ class ScheduleGenerator:
                     lesson.lesson_id
                 )
 
+                for student_id in target.student_ids:
+                    self.student_lessons[student_id].append(
+                        lesson.lesson_id
+                    )
+
     # ============================================================
     # INPUT VALIDATION
     # ============================================================
@@ -328,6 +360,7 @@ class ScheduleGenerator:
         slot_count = len(self.data.time_slots)
         lesson_ids_by_teacher: dict[int, set[int]] = defaultdict(set)
         lesson_ids_by_resource: dict[tuple[str, int], set[int]] = defaultdict(set)
+        lesson_ids_by_student: dict[int, set[int]] = defaultdict(set)
 
         for lesson in self.data.lessons:
 
@@ -363,6 +396,12 @@ class ScheduleGenerator:
                         "имеет некорректное количество студентов."
                     )
 
+                if not target.student_ids:
+                    raise ValueError(
+                        f"Lesson #{lesson.lesson_id}: "
+                        f"цель id={target.target_id} не содержит студентов."
+                    )
+
                 if target.teacher_id <= 0:
                     raise ValueError(
                         f"Lesson #{lesson.lesson_id}: "
@@ -375,6 +414,10 @@ class ScheduleGenerator:
                 )
                 for resource_key in target.resource_keys:
                     lesson_ids_by_resource[resource_key].add(
+                        lesson.lesson_id
+                    )
+                for student_id in target.student_ids:
+                    lesson_ids_by_student[student_id].add(
                         lesson.lesson_id
                     )
 
@@ -422,6 +465,17 @@ class ScheduleGenerator:
                     f"ресурс {resource_key[0]}:{resource_key[1]} имеет "
                     f"{len(lesson_ids)} занятий, но доступно только "
                     f"{slot_count} временных слотов"
+                )
+
+        daily_capacity = (
+            len(self.day_slots) * self.MAX_STUDENT_LESSONS_PER_DAY
+        )
+        for student_id, lesson_ids in lesson_ids_by_student.items():
+            if len(lesson_ids) > daily_capacity:
+                diagnostics.append(
+                    f"студент #{student_id} имеет {len(lesson_ids)} занятий, "
+                    f"но при лимите {self.MAX_STUDENT_LESSONS_PER_DAY} в день "
+                    f"можно разместить только {daily_capacity}"
                 )
 
         if diagnostics:
@@ -850,6 +904,44 @@ class ScheduleGenerator:
                         sum(variables) <= 1
                     )
 
+    def _student_lesson_cohorts(
+        self,
+    ) -> list[tuple[tuple[int, ...], tuple[int, ...]]]:
+        """Group students with identical lesson sets to keep CP-SAT compact."""
+        students_by_lessons: dict[tuple[int, ...], list[int]] = defaultdict(list)
+        for student_id, lesson_ids in self.student_lessons.items():
+            key = tuple(sorted(set(lesson_ids)))
+            if key:
+                students_by_lessons[key].append(student_id)
+        return [
+            (tuple(sorted(student_ids)), lesson_ids)
+            for lesson_ids, student_ids in sorted(students_by_lessons.items())
+        ]
+
+    def _add_student_conflicts_and_daily_limit(self) -> None:
+        """Prevent individual clashes and cap every student's day at 6 lessons."""
+        assert self.data is not None
+
+        for _, lesson_ids in self._student_lesson_cohorts():
+            for slot in self.data.time_slots:
+                self.model.Add(
+                    sum(
+                        self.lesson_slot_bool[(lesson_id, slot.time_slot_id)]
+                        for lesson_id in lesson_ids
+                    )
+                    <= 1
+                )
+
+            for slot_ids in self.day_slots.values():
+                self.model.Add(
+                    sum(
+                        self.lesson_slot_bool[(lesson_id, slot_id)]
+                        for lesson_id in lesson_ids
+                        for slot_id in slot_ids
+                    )
+                    <= self.MAX_STUDENT_LESSONS_PER_DAY
+                )
+
     # ============================================================
     # CLASSROOM CONFLICTS
     # ============================================================
@@ -948,273 +1040,293 @@ class ScheduleGenerator:
 
     def _add_objective(self) -> None:
         """
-        Пока НЕ вызывается в generate().
+        Выбирает более удобное из допустимых расписаний.
 
-        Оставлено для следующего этапа, когда базовая
-        выполнимость будет подтверждена.
-
-        Приоритеты будущей оптимизации:
-
-        1. уменьшение количества рабочих дней;
-        2. уменьшение окон;
-        3. уменьшение поздних пар;
-        4. более равномерное распределение нагрузки.
+        Жёсткие ограничения добавляются до objective, поэтому оптимизация
+        не может заменить проверку конфликтов или вместимости.
         """
 
         assert self.data is not None
 
-        objective_terms = []
+        student_objective_terms = []
+        student_count_by_lesson: dict[int, int] = defaultdict(int)
+        for lesson_ids in self.student_lessons.values():
+            for lesson_id in set(lesson_ids):
+                student_count_by_lesson[lesson_id] += 1
 
-        # --------------------------------------------------------
-        # 1. Поздние пары
-        # --------------------------------------------------------
-
+        # Penalize late lessons per affected student, not per database row.
+        late_penalties = {
+            4: 2,
+            5: 6,
+            6: 15,
+            7: 35,
+            8: 65,
+            9: 100,
+            10: 150,
+            11: 210,
+            12: 280,
+            13: 360,
+        }
         for lesson in self.data.lessons:
-
+            affected_students = student_count_by_lesson[lesson.lesson_id]
             for slot in self.data.time_slots:
-
-                slot_number = slot.lesson_number
-
-                if slot_number >= 7:
-                    penalty = 120
-                elif slot_number >= 6:
-                    penalty = 80
-                elif slot_number >= 5:
-                    penalty = 35
-                elif slot_number >= 4:
-                    penalty = 10
-                else:
-                    penalty = 0
-
-                if penalty > 0:
-
-                    objective_terms.append(
+                penalty = late_penalties.get(slot.lesson_number, 0)
+                if penalty:
+                    student_objective_terms.append(
                         penalty
+                        * affected_students
                         * self.lesson_slot_bool[
-                            (
-                                lesson.lesson_id,
-                                slot.time_slot_id,
-                            )
+                            (lesson.lesson_id, slot.time_slot_id)
                         ]
                     )
 
-        # --------------------------------------------------------
-        # 2. Суббота
-        # --------------------------------------------------------
-
-        for lesson in self.data.lessons:
-
-            for slot in self.data.time_slots:
-
-                if slot.day_of_week == 6:
-
-                    objective_terms.append(
-                        80
-                        * self.lesson_slot_bool[
-                            (
-                                lesson.lesson_id,
-                                slot.time_slot_id,
-                            )
-                        ]
-                    )
-
-        # --------------------------------------------------------
-        # 3. Окна
-        # --------------------------------------------------------
-
-        objective_terms.extend(
-            self._build_gap_penalties()
+        # Real student gaps have the highest priority. Day-use and sixth-
+        # lesson penalties then compact the week without creating overloads.
+        student_objective_terms.extend(
+            self._build_student_quality_penalties()
         )
 
-        if objective_terms:
-            self.model.Minimize(
-                sum(objective_terms)
+        student_objective = (
+            cp_model.LinearExpr.Sum(student_objective_terms)
+            if student_objective_terms
+            else 0
+        )
+        self.model.Minimize(student_objective)
+
+    def _optimize_classroom_assignments(
+        self,
+        placements: Iterable[LessonPlacement],
+    ) -> list[LessonPlacement]:
+        """Optimize rooms with lesson times fixed by the main solver."""
+        assert self.data is not None
+
+        placement_list = list(placements)
+        slot_by_lesson = {
+            placement.lesson_id: placement.time_slot_id
+            for placement in placement_list
+        }
+        room_model = cp_model.CpModel()
+        event_variables: dict[
+            tuple[int, int],
+            cp_model.IntVar,
+        ] = {}
+        event_targets: dict[int, tuple[int, ...]] = {}
+        room_variables: dict[int, list[cp_model.IntVar]] = defaultdict(list)
+        slot_room_variables: dict[
+            tuple[int, int],
+            list[cp_model.IntVar],
+        ] = defaultdict(list)
+        capacity_waste_terms = []
+        event_index = 0
+
+        for lesson in self.data.lessons:
+            slot_id = slot_by_lesson[lesson.lesson_id]
+            if lesson.lesson_type == "lecture":
+                if not lesson.targets:
+                    continue
+                target = lesson.targets[0]
+                required_capacity = sum(
+                    item.student_count for item in lesson.targets
+                )
+                targets = tuple(
+                    item.lesson_target_id for item in lesson.targets
+                )
+                event_specs = ((target, targets, required_capacity),)
+            else:
+                event_specs = tuple(
+                    (
+                        target,
+                        (target.lesson_target_id,),
+                        target.student_count,
+                    )
+                    for target in lesson.targets
+                )
+
+            for target, target_ids, required_capacity in event_specs:
+                valid_classrooms = self._get_valid_classrooms(
+                    lesson=lesson,
+                    target=target,
+                )
+                event_targets[event_index] = target_ids
+                choices = []
+                for classroom_id in valid_classrooms:
+                    variable = room_model.NewBoolVar(
+                        f"event_{event_index}_room_{classroom_id}"
+                    )
+                    event_variables[(event_index, classroom_id)] = variable
+                    choices.append(variable)
+                    room_variables[classroom_id].append(variable)
+                    slot_room_variables[(slot_id, classroom_id)].append(variable)
+                    capacity_waste_terms.append(
+                        (
+                            self.classroom_by_id[classroom_id].capacity
+                            - required_capacity
+                        )
+                        * variable
+                    )
+                room_model.Add(cp_model.LinearExpr.Sum(choices) == 1)
+                event_index += 1
+
+        for variables in slot_room_variables.values():
+            room_model.Add(cp_model.LinearExpr.Sum(variables) <= 1)
+
+        assignment_count = event_index
+        usage_variables = []
+        for classroom in self.data.classrooms:
+            variables = room_variables[classroom.classroom_id]
+            usage = room_model.NewIntVar(
+                0,
+                assignment_count,
+                f"room_{classroom.classroom_id}_weekly_usage",
+            )
+            room_model.Add(
+                usage
+                == (
+                    cp_model.LinearExpr.Sum(variables)
+                    if variables
+                    else 0
+                )
+            )
+            usage_variables.append(usage)
+
+        max_usage = room_model.NewIntVar(
+            0,
+            assignment_count,
+            "maximum_weekly_room_usage",
+        )
+        if usage_variables:
+            room_model.AddMaxEquality(max_usage, usage_variables)
+        else:
+            room_model.Add(max_usage == 0)
+
+        # One fewer empty seat is more important than any possible change in
+        # the balancing tie-breaker.
+        balance_scale = assignment_count + 1
+        capacity_waste = (
+            cp_model.LinearExpr.Sum(capacity_waste_terms)
+            if capacity_waste_terms
+            else 0
+        )
+        room_model.Minimize(balance_scale * capacity_waste + max_usage)
+
+        room_solver = cp_model.CpSolver()
+        room_solver.parameters.max_time_in_seconds = 10.0
+        room_solver.parameters.num_search_workers = 8
+        status = room_solver.Solve(room_model)
+        if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+            raise ValueError(
+                "Не удалось оптимально распределить аудитории для "
+                "построенного расписания."
             )
 
+        classrooms_by_lesson: dict[int, dict[int, int]] = defaultdict(dict)
+        lesson_by_event: dict[int, int] = {}
+        event_index = 0
+        for lesson in self.data.lessons:
+            event_count = 1 if lesson.lesson_type == "lecture" else len(lesson.targets)
+            for _ in range(event_count):
+                lesson_by_event[event_index] = lesson.lesson_id
+                event_index += 1
+
+        for (current_event, classroom_id), variable in event_variables.items():
+            if room_solver.Value(variable) != 1:
+                continue
+            lesson_id = lesson_by_event[current_event]
+            for lesson_target_id in event_targets[current_event]:
+                classrooms_by_lesson[lesson_id][lesson_target_id] = classroom_id
+
+        return [
+            LessonPlacement(
+                lesson_id=placement.lesson_id,
+                time_slot_id=placement.time_slot_id,
+                classroom_by_target=classrooms_by_lesson[placement.lesson_id],
+            )
+            for placement in placement_list
+        ]
+
     # ============================================================
-    # GAP PENALTIES
+    # STUDENT QUALITY PENALTIES
     # ============================================================
 
-    def _build_gap_penalties(self):
+    def _build_student_quality_penalties(self):
         assert self.data is not None
 
         penalties = []
 
-        resources: dict[
-            tuple[str, int],
-            set[int],
-        ] = defaultdict(set)
-
-        for lesson in self.data.lessons:
-
-            for target in lesson.targets:
-
-                resources[
-                    (
-                        target.target_type,
-                        target.target_id,
-                    )
-                ].add(
-                    lesson.lesson_id
-                )
-
-        for resource_key, lesson_ids in (
-            resources.items()
+        for cohort_index, (student_ids, lesson_ids) in enumerate(
+            self._student_lesson_cohorts()
         ):
+            cohort_size = len(student_ids)
+            for day_of_week, slot_ids in self.day_slots.items():
+                day_variables = [
+                    self.lesson_slot_bool[(lesson_id, slot_id)]
+                    for lesson_id in lesson_ids
+                    for slot_id in slot_ids
+                ]
+                day_count = cp_model.LinearExpr.Sum(day_variables)
 
-            lesson_ids_list = sorted(
-                lesson_ids
-            )
+                day_used = self.model.NewBoolVar(
+                    f"cohort_{cohort_index}_day_{day_of_week}_used"
+                )
+                self.model.Add(day_count >= 1).OnlyEnforceIf(day_used)
+                self.model.Add(day_count == 0).OnlyEnforceIf(day_used.Not())
+                penalties.append(100 * cohort_size * day_used)
+                if day_of_week == 6:
+                    penalties.append(600 * cohort_size * day_used)
 
-            if len(lesson_ids_list) < 2:
-                continue
-
-            for day_of_week, slot_ids in (
-                self.day_slots.items()
-            ):
+                sixth_lesson = self.model.NewBoolVar(
+                    f"cohort_{cohort_index}_day_{day_of_week}_sixth"
+                )
+                self.model.Add(day_count >= 6).OnlyEnforceIf(sixth_lesson)
+                self.model.Add(day_count <= 5).OnlyEnforceIf(
+                    sixth_lesson.Not()
+                )
+                penalties.append(220 * cohort_size * sixth_lesson)
 
                 if len(slot_ids) < 3:
                     continue
 
-                for first_index in range(
-                    len(slot_ids)
-                ):
-
-                    first_slot_id = (
-                        slot_ids[first_index]
+                slot_used = []
+                for slot_id in slot_ids:
+                    occupied = self.model.NewBoolVar(
+                        f"cohort_{cohort_index}_slot_{slot_id}_used"
                     )
-
-                    for second_index in range(
-                        first_index + 2,
-                        len(slot_ids),
-                    ):
-
-                        second_slot_id = (
-                            slot_ids[second_index]
+                    self.model.Add(
+                        occupied
+                        == sum(
+                            self.lesson_slot_bool[(lesson_id, slot_id)]
+                            for lesson_id in lesson_ids
                         )
+                    )
+                    slot_used.append(occupied)
 
-                        distance = (
-                            second_index
-                            - first_index
-                        )
+                for index in range(1, len(slot_ids) - 1):
+                    has_before = self.model.NewBoolVar(
+                        f"cohort_{cohort_index}_slot_{slot_ids[index]}_before"
+                    )
+                    before = cp_model.LinearExpr.Sum(slot_used[:index])
+                    self.model.Add(before >= has_before)
+                    self.model.Add(before <= index * has_before)
 
-                        gap_size = distance - 1
+                    has_after = self.model.NewBoolVar(
+                        f"cohort_{cohort_index}_slot_{slot_ids[index]}_after"
+                    )
+                    after_count = len(slot_ids) - index - 1
+                    after = cp_model.LinearExpr.Sum(slot_used[index + 1:])
+                    self.model.Add(after >= has_after)
+                    self.model.Add(after <= after_count * has_after)
 
-                        if gap_size == 1:
-                            penalty = 8
-                        elif gap_size == 2:
-                            penalty = 30
-                        elif gap_size == 3:
-                            penalty = 70
-                        else:
-                            penalty = 120
-
-                        # ------------------------------------------------
-                        # Используется ли ресурс в первом слоте?
-                        # ------------------------------------------------
-
-                        first_variables = [
-                            self.lesson_slot_bool[
-                                (
-                                    lesson_id,
-                                    first_slot_id,
-                                )
-                            ]
-                            for lesson_id in lesson_ids_list
-                        ]
-
-                        first_day_used = (
-                            self.model.NewBoolVar(
-                                (
-                                    f"resource_"
-                                    f"{resource_key[0]}_"
-                                    f"{resource_key[1]}_"
-                                    f"day_{day_of_week}_"
-                                    f"slot_{first_slot_id}"
-                                )
-                            )
-                        )
-
-                        self.model.Add(
-                            first_day_used
-                            == cp_model.LinearExpr.Sum(
-                                first_variables
-                            )
-                        )
-
-                        # ------------------------------------------------
-                        # Используется ли ресурс во втором слоте?
-                        # ------------------------------------------------
-
-                        second_variables = [
-                            self.lesson_slot_bool[
-                                (
-                                    lesson_id,
-                                    second_slot_id,
-                                )
-                            ]
-                            for lesson_id in lesson_ids_list
-                        ]
-
-                        second_day_used = (
-                            self.model.NewBoolVar(
-                                (
-                                    f"resource_"
-                                    f"{resource_key[0]}_"
-                                    f"{resource_key[1]}_"
-                                    f"day_{day_of_week}_"
-                                    f"slot_{second_slot_id}"
-                                )
-                            )
-                        )
-
-                        self.model.Add(
-                            second_day_used
-                            == cp_model.LinearExpr.Sum(
-                                second_variables
-                            )
-                        )
-
-                        # ------------------------------------------------
-                        # Окно
-                        # ------------------------------------------------
-
-                        gap_variable = (
-                            self.model.NewBoolVar(
-                                (
-                                    f"gap_"
-                                    f"{resource_key[0]}_"
-                                    f"{resource_key[1]}_"
-                                    f"{day_of_week}_"
-                                    f"{first_slot_id}_"
-                                    f"{second_slot_id}"
-                                )
-                            )
-                        )
-
-                        self.model.Add(
-                            gap_variable
-                            >= (
-                                first_day_used
-                                + second_day_used
-                                - 1
-                            )
-                        )
-
-                        self.model.Add(
-                            gap_variable
-                            <= first_day_used
-                        )
-
-                        self.model.Add(
-                            gap_variable
-                            <= second_day_used
-                        )
-
-                        penalties.append(
-                            penalty
-                            * gap_variable
-                        )
+                    gap = self.model.NewBoolVar(
+                        f"cohort_{cohort_index}_slot_{slot_ids[index]}_gap"
+                    )
+                    self.model.Add(gap <= has_before)
+                    self.model.Add(gap <= has_after)
+                    self.model.Add(gap + slot_used[index] <= 1)
+                    self.model.Add(
+                        gap
+                        >= has_before + has_after - slot_used[index] - 1
+                    )
+                    penalties.append(1000 * cohort_size * gap)
 
         return penalties
 
@@ -1451,33 +1563,21 @@ class ScheduleGenerator:
             placements
         )
 
-        lesson_ids = [
-            placement.lesson_id
-            for placement in placement_list
-        ]
-
-        # --------------------------------------------------------
-        # Сбрасываем старые аудитории
-        # --------------------------------------------------------
-
-        if lesson_ids:
-
-            self.db.query(
-                LessonTarget
-            ).filter(
-                LessonTarget.lesson_id.in_(
-                    lesson_ids
-                )
-            ).update(
-                {
-                    LessonTarget.classroom_id: None,
-                },
-                synchronize_session=False,
-            )
-
         # --------------------------------------------------------
         # Сохраняем расписание
         # --------------------------------------------------------
+
+        target_ids = [
+            target_id
+            for placement in placement_list
+            for target_id in placement.classroom_by_target
+        ]
+        targets_by_id = {
+            target.id: target
+            for target in self.db.query(LessonTarget)
+            .filter(LessonTarget.id.in_(target_ids))
+            .all()
+        } if target_ids else {}
 
         for placement in placement_list:
 
@@ -1490,6 +1590,7 @@ class ScheduleGenerator:
             self.db.add(
                 schedule_item
             )
+            self.db.flush()
 
             # ----------------------------------------------------
             # Сохраняем аудитории targets
@@ -1500,21 +1601,9 @@ class ScheduleGenerator:
                 classroom_id,
             ) in placement.classroom_by_target.items():
 
-                target = (
-                    self.db.query(
-                        LessonTarget
-                    )
-                    .filter(
-                        LessonTarget.id
-                        == target_id,
+                target = targets_by_id.get(target_id)
 
-                        LessonTarget.lesson_id
-                        == placement.lesson_id,
-                    )
-                    .first()
-                )
-
-                if target is None:
+                if target is None or target.lesson_id != placement.lesson_id:
                     raise ValueError(
                         f"LessonTarget "
                         f"id={target_id} "
@@ -1523,8 +1612,12 @@ class ScheduleGenerator:
                         "не найден."
                     )
 
-                target.classroom_id = (
-                    classroom_id
+                self.db.add(
+                    ScheduleItemClassroom(
+                        schedule_item_id=schedule_item.id,
+                        lesson_target_id=target_id,
+                        classroom_id=classroom_id,
+                    )
                 )
 
         self.db.commit()

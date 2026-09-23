@@ -1,3 +1,5 @@
+from math import ceil
+
 from sqlalchemy.orm import Session
 
 from backend.app.models.lecture_stream import LectureStream
@@ -25,7 +27,7 @@ def calculate_subgroup_sizes(student_count: int) -> list[int]:
 
     # Подбираем количество подгрупп так,
     # чтобы средний размер был максимально близок к 14.
-    subgroup_count = max(1, round(student_count / 14))
+    subgroup_count = max(1, ceil(student_count / 14))
 
     # Для небольших потоков не создаём лишние подгруппы.
     if subgroup_count > 1 and student_count / subgroup_count < 12:

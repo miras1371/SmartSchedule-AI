@@ -31,6 +31,7 @@ from backend.app.models.classroom import Classroom
 from backend.app.models.time_slot import TimeSlot
 from backend.app.models.schedule_version import ScheduleVersion
 from backend.app.models.schedule_item import ScheduleItem
+from backend.app.models.schedule_item_classroom import ScheduleItemClassroom
 from backend.app.models.generation_job import GenerationJob
 from backend.app.models.scheduling_constraint import SchedulingConstraint
 
@@ -68,6 +69,7 @@ __all__ = [
     "TimeSlot",
     "ScheduleVersion",
     "ScheduleItem",
+    "ScheduleItemClassroom",
     "GenerationJob",
     "SchedulingConstraint",
 ]

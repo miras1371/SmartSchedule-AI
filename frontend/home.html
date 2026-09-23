@@ -27,7 +27,7 @@
 
 
 <!-- SIDEBAR -->
-<aside class="sidebar">
+<aside class="sidebar" id="app-sidebar">
 
     <div class="sidebar-top">
 
@@ -48,30 +48,35 @@
 
             <a href="dashboard.html" class="nav-item" data-screen="dashboard">
                 <span class="nav-icon">⌂</span>
-                <span>Dashboard</span>
+                <span>Обзор</span>
             </a>
+            <div class="nav-section-title">
+                Расписание
+            </div>
 
-            <div class="nav-item" data-nav-group="schedule">
+
+            <a href="home.html" class="nav-item active" data-screen="schedule">
                 <span class="nav-icon">▦</span>
                 <span>Расписание</span>
-            </div>
+            </a>
 
-            <div class="nav-submenu">
-                <a href="home.html" class="nav-subitem active-subitem" data-screen="schedule">
-                    Просмотр расписания
-                </a>
+            <a href="occupancy.html" class="nav-item" data-screen="occupancy">
+                <span class="nav-icon">⌘</span>
+                <span>Загрузка аудиторий</span>
+            </a>
 
-                <a href="generation.html" class="nav-subitem" data-screen="generation">
-                    Генерация
-                </a>
+            <a href="generation.html" class="nav-item" data-screen="generation">
+                <span class="nav-icon">✦</span>
+                <span>Создать расписание</span>
+            </a>
 
-                <a href="versions.html" class="nav-subitem" data-screen="versions">
-                    Версии
-                </a>
-            </div>
+            <a href="versions.html" class="nav-item" data-screen="versions">
+                <span class="nav-icon">◫</span>
+                <span>Версии</span>
+            </a>
 
             <div class="nav-section-title">
-                УЧЕБНЫЕ ДАННЫЕ
+                ДАННЫЕ
             </div>
 
             <a href="periods.html" class="nav-item" data-screen="periods">
@@ -142,12 +147,12 @@
 
     <div class="sidebar-bottom">
 
-        <a href="profile.html" class="nav-item" id="settings-nav-item" data-screen="profile">
+        <a href="settings.html" class="nav-item" id="settings-nav-item" data-screen="settings">
             <span class="nav-icon">⚙</span>
             <span>Настройки</span>
         </a>
 
-        <button class="profile-mini" id="profile-menu-button" type="button">
+        <a class="profile-mini" id="profile-menu-button" href="profile.html">
 
             <div class="avatar">
                 М
@@ -158,13 +163,13 @@
                     <span id="sidebar-profile-role">Администратор</span>
             </div>
 
-            <span class="profile-arrow">⋯</span>
-
-        </button>
+        </a>
 
     </div>
 
 </aside>
+
+<button class="sidebar-backdrop" id="sidebar-backdrop" type="button" aria-label="Закрыть меню"></button>
 
 
 <!-- MAIN -->
@@ -173,24 +178,19 @@
     <!-- HEADER -->
     <header class="topbar">
 
-        <div class="breadcrumbs">
-            <span id="breadcrumb-section">Расписание</span>
-            <span>/</span>
-            <span id="breadcrumb-page">Просмотр расписания</span>
+        <div class="topbar-leading">
+            <button class="mobile-menu-button" id="mobile-menu" type="button" aria-label="Открыть меню"><span></span><span></span><span></span></button>
+            <div class="breadcrumbs">
+                <span id="breadcrumb-section">Рабочее пространство</span>
+                <span>/</span>
+                <strong id="breadcrumb-page">Расписание</strong>
+            </div>
         </div>
 
         <div class="topbar-actions">
 
-            <button class="icon-button" type="button">
-                ?
-            </button>
-
-            <button class="icon-button" type="button">
-                🔔
-            </button>
-
             <button id="logout-button" class="icon-button logout-button" type="button" title="Выйти">
-                ⎋
+                ↗
             </button>
 
             <button class="topbar-avatar" id="topbar-profile-button" type="button">
@@ -338,13 +338,10 @@
 
                 <div class="select-wrapper">
 
-                    <label>
-                        Группа
-                    </label>
-
-                <select id="group-select">
-                    <option value="">Все группы</option>
-                </select>
+                    <label>Учебная единица</label>
+                    <select id="group-select">
+                        <option value="">Все группы и потоки</option>
+                    </select>
 
                 </div>
 
@@ -357,10 +354,6 @@
 
                     <button class="view-button" type="button" data-view="day">
                         День
-                    </button>
-
-                    <button class="view-button" type="button" data-view="group">
-                        Группа
                     </button>
 
                 </div>

@@ -5,36 +5,20 @@ from sqlalchemy.orm import Session
 from backend.app.models.schedule_version import ScheduleVersion
 
 
-def _target_resources(target) -> set[tuple[str, int]]:
-    resources: set[tuple[str, int]] = set()
-
-    if target.group_id is not None:
-        resources.add(("group", target.group_id))
-
+def _target_student_ids(target) -> set[int]:
+    if target.group is not None:
+        return {student.id for student in target.group.students}
     if target.subgroup is not None:
-        resources.add(("subgroup", target.subgroup.id))
-        resources.update(
-            ("group", student.student.group_id)
-            for student in target.subgroup.students
-        )
-
+        return {student.student_id for student in target.subgroup.students}
     if target.lecture_part is not None:
-        resources.add(("lecture_part", target.lecture_part.id))
-        resources.update(
-            ("group", student.student.group_id)
-            for student in target.lecture_part.students
-        )
-
+        return {student.student_id for student in target.lecture_part.students}
     if target.subgroup_bundle is not None:
-        resources.add(("subgroup_bundle", target.subgroup_bundle.id))
-        for member in target.subgroup_bundle.members:
-            resources.add(("subgroup", member.subgroup_id))
-            resources.update(
-                ("group", student.student.group_id)
-                for student in member.subgroup.students
-            )
-
-    return resources
+        return {
+            student.student_id
+            for member in target.subgroup_bundle.members
+            for student in member.subgroup.students
+        }
+    return set()
 
 
 def validate_schedule_version(
@@ -52,16 +36,38 @@ def validate_schedule_version(
 
     issues: list[dict] = []
     slot_teachers: dict[int, dict[int, int]] = defaultdict(dict)
-    slot_resources: dict[int, dict[tuple[str, int], int]] = defaultdict(dict)
+    slot_students: dict[int, dict[int, int]] = defaultdict(dict)
     slot_classrooms: dict[int, dict[int, int]] = defaultdict(dict)
+    student_day_lessons: dict[tuple[int, int], set[int]] = defaultdict(set)
     lesson_occurrences: dict[int, int] = defaultdict(int)
 
     for item in version.schedule_items:
         lesson = item.lesson
         lesson_occurrences[lesson.id] += 1
+        classrooms_by_target = {
+            assignment.lesson_target_id: assignment.classroom
+            for assignment in item.classroom_assignments
+        }
+        lecture_capacity = (
+            sum(_target_student_count(target) for target in lesson.targets)
+            if lesson.lesson_type == "lecture"
+            else None
+        )
+        if lesson.lesson_type == "lecture":
+            lecture_room_ids = {
+                classroom.id
+                for classroom in classrooms_by_target.values()
+                if classroom is not None
+            }
+            if len(lecture_room_ids) > 1:
+                issues.append({
+                    "code": "lecture_classroom_mismatch",
+                    "lesson_id": lesson.id,
+                    "message": "Цели одной лекции назначены в разные аудитории.",
+                })
 
         for target in lesson.targets:
-            classroom = target.classroom
+            classroom = classrooms_by_target.get(target.id)
             if classroom is None:
                 issues.append({
                     "code": "missing_classroom",
@@ -71,7 +77,12 @@ def validate_schedule_version(
                 })
                 continue
 
-            if classroom.capacity < _target_student_count(target):
+            required_capacity = (
+                lecture_capacity
+                if lecture_capacity is not None
+                else _target_student_count(target)
+            )
+            if classroom.capacity < required_capacity:
                 issues.append({
                     "code": "classroom_capacity",
                     "lesson_id": lesson.id,
@@ -131,9 +142,9 @@ def validate_schedule_version(
                     })
                 slot_teachers[item.time_slot_id][teacher.id] = lesson.id
 
-            for resource in _target_resources(target):
-                previous_lesson = slot_resources[item.time_slot_id].get(
-                    resource
+            for student_id in _target_student_ids(target):
+                previous_lesson = slot_students[item.time_slot_id].get(
+                    student_id
                 )
                 if (
                     previous_lesson is not None
@@ -144,11 +155,14 @@ def validate_schedule_version(
                         "lesson_id": lesson.id,
                         "target_id": target.id,
                         "message": (
-                            f"Ресурс {resource[0]}:{resource[1]} также "
-                            f"занят на занятии {previous_lesson}."
+                            f"Студент #{student_id} также назначен на "
+                            f"занятие {previous_lesson}."
                         ),
                     })
-                slot_resources[item.time_slot_id][resource] = lesson.id
+                slot_students[item.time_slot_id][student_id] = lesson.id
+                student_day_lessons[
+                    (student_id, item.time_slot.day_of_week)
+                ].add(lesson.id)
 
     for lesson_id, occurrences in lesson_occurrences.items():
         if occurrences > 1:
@@ -157,6 +171,18 @@ def validate_schedule_version(
                 "lesson_id": lesson_id,
                 "message": (
                     f"Занятие сохранено в версии {occurrences} раз."
+                ),
+            })
+
+    for (student_id, day_of_week), lesson_ids in student_day_lessons.items():
+        if len(lesson_ids) > 6:
+            issues.append({
+                "code": "student_daily_limit",
+                "student_id": student_id,
+                "day_of_week": day_of_week,
+                "message": (
+                    f"У студента #{student_id} в день {day_of_week} "
+                    f"назначено {len(lesson_ids)} занятий при лимите 6."
                 ),
             })
 
