@@ -1,6 +1,8 @@
-const apiBase = window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+const apiBase = window.location.protocol === "file:"
   ? "http://localhost:8000"
-  : window.location.origin;
+  : (["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port && window.location.port !== "8000")
+    ? "http://localhost:8000"
+    : window.location.origin;
 const tokenKey = "smart_schedule_token";
 const $ = (selector) => document.querySelector(selector);
 const semesterSelect = $("#semester-select");
@@ -46,6 +48,20 @@ const profileLogoutButton = $("#profile-logout-button");
 const profileMenuButton = $("#profile-menu-button");
 const topbarProfileButton = $("#topbar-profile-button");
 const managementFilters = $("#management-filters");
+
+function applySavedAvatar(fallback = "М") {
+  const savedAvatar = localStorage.getItem("smart_schedule_avatar");
+  document.querySelectorAll(".avatar, .topbar-avatar").forEach((item) => {
+    if (savedAvatar) {
+      const image = document.createElement("img");
+      image.src = savedAvatar;
+      image.alt = "Фото профиля";
+      item.replaceChildren(image);
+    } else {
+      item.textContent = fallback;
+    }
+  });
+}
 
 const dayNames = { 1: "Понедельник", 2: "Вторник", 3: "Среда", 4: "Четверг", 5: "Пятница", 6: "Суббота" };
 const screenConfig = {
@@ -414,7 +430,7 @@ async function loadProfile() {
   $("#sidebar-profile-name").textContent = currentUser.full_name;
   $("#sidebar-profile-role").textContent = "Администратор";
   const initials = currentUser.full_name.trim().charAt(0).toUpperCase();
-  document.querySelectorAll(".avatar, .topbar-avatar").forEach((item) => { item.textContent = initials; });
+  applySavedAvatar(initials);
 }
 function logout() {
   localStorage.removeItem(tokenKey);
@@ -581,6 +597,7 @@ $("#zoom-out-button")?.addEventListener("click", () => { state.zoom = Math.max(7
 $("#zoom-in-button")?.addEventListener("click", () => { state.zoom = Math.min(130, state.zoom + 15); applyScheduleZoom(); });
 $("#zoom-reset-button")?.addEventListener("click", () => { state.zoom = 100; applyScheduleZoom(); });
 applyScheduleZoom();
+applySavedAvatar();
 if (!localStorage.getItem(tokenKey)) window.location.href = "login.html";
 loadPeriods().catch((error) => setStatus(`Не удалось подключиться к API: ${error.message}`, true));
 function applyTheme(theme) {

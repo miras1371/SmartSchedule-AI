@@ -1,6 +1,8 @@
-const apiBase = window.location.protocol === "file:" || window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+const apiBase = window.location.protocol === "file:"
   ? "http://localhost:8000"
-  : window.location.origin;
+  : (["localhost", "127.0.0.1"].includes(window.location.hostname) && window.location.port && window.location.port !== "8000")
+    ? "http://localhost:8000"
+    : window.location.origin;
 const form = document.querySelector("#login-form");
 const usernameInput = document.querySelector("#username");
 const passwordInput = document.querySelector("#password");
